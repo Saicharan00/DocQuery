@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Real secrets — never commit. Keys live here at runtime.
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+# ...but DO commit the empty-placeholder template.
+!.env.example
