@@ -23,10 +23,7 @@ the harness itself, outside the model's control, so it's a hard technical
 guarantee instead of a hope.
 
 **What it achieves:**
-- Real API keys (OpenAI, Anthropic, Clerk, Supabase service role, etc.) can
-  never enter the conversation transcript, get echoed back to me, or get
-  logged — even if I (or a future prompt injection from some pasted content)
-  accidentally ask for it.
+- Real API keys (OpenAI, Anthropic, Clerk, Supabase service role, etc.) can never enter the conversation transcript, get echoed back to me, or get logged — even if I (or a future prompt injection from some pasted content) accidentally ask for it.
 - The backend config docs (`.env.example`) stay fully readable so Claude
   always knows *which* variables exist without ever seeing *values*.
 - Verified working on Day 1: direct attempts to read `.env` are denied with
