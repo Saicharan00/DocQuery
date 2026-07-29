@@ -1,0 +1,189 @@
+"""Request-scoped dependencies: who is calling, and how we talk to the database.
+
+Two things live here.
+
+1. `get_current_user` — verifies the Clerk JWT on the request and returns the
+   Clerk user id (the token's `sub` claim). This is a fast fail-closed check.
+
+2. `get_supabase_client` — builds a Supabase client that carries the caller's
+   JWT, so PostgREST populates `request.jwt.claims` and the RLS policies from
+   `001_init.sql` decide what rows come back.
+
+RLS is the security boundary, not (1). (1) exists so unauthenticated requests
+get a clean 401 instead of an opaque database error.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Annotated, Any
+
+import httpx
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import jwt
+from jose.exceptions import ExpiredSignatureError, JWTError
+from supabase import Client, ClientOptions, create_client
+
+from app.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+# Clerk rotates signing keys rarely. Re-fetch hourly, or immediately when a
+# token arrives signed by a `kid` we haven't seen.
+JWKS_TTL_SECONDS = 3600
+JWKS_MIN_REFETCH_SECONDS = 30
+
+# auto_error=False so a missing header reaches our code and we control the
+# response shape, rather than FastAPI raising a 403 for a missing bearer token.
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+class JwksCache:
+    """In-memory cache of Clerk's public signing keys."""
+
+    def __init__(self) -> None:
+        self._keys: dict[str, dict[str, Any]] = {}
+        self._fetched_at: float = 0.0
+        self._lock = asyncio.Lock()
+
+    @property
+    def is_populated(self) -> bool:
+        return bool(self._keys)
+
+    async def refresh(self, jwks_url: str) -> None:
+        """Fetch the key set. Raises on network or malformed-response failure."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(jwks_url)
+            response.raise_for_status()
+            payload = response.json()
+
+        keys = {key["kid"]: key for key in payload.get("keys", []) if "kid" in key}
+        if not keys:
+            raise ValueError(f"No usable signing keys returned by {jwks_url}")
+
+        self._keys = keys
+        self._fetched_at = time.monotonic()
+        logger.info("Loaded %d Clerk signing key(s)", len(keys))
+
+    async def get_key(self, kid: str, jwks_url: str) -> dict[str, Any]:
+        """Return the JWK for `kid`, refetching if it's unknown or stale."""
+        age = time.monotonic() - self._fetched_at
+        needs_fetch = not self._keys or age > JWKS_TTL_SECONDS
+
+        if not needs_fetch and kid in self._keys:
+            return self._keys[kid]
+
+        async with self._lock:
+            # Another request may have refreshed while we waited for the lock.
+            if kid in self._keys and time.monotonic() - self._fetched_at <= JWKS_TTL_SECONDS:
+                return self._keys[kid]
+
+            if self._keys and time.monotonic() - self._fetched_at < JWKS_MIN_REFETCH_SECONDS:
+                # Don't hammer Clerk when a bad `kid` is retried in a loop.
+                raise _unauthorized("Token signing key is not recognised.")
+
+            try:
+                await self.refresh(jwks_url)
+            except Exception as exc:
+                logger.error("Could not fetch Clerk signing keys: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Cannot reach the authentication provider. Try again shortly.",
+                ) from exc
+
+        if kid not in self._keys:
+            raise _unauthorized("Token signing key is not recognised.")
+        return self._keys[kid]
+
+
+jwks_cache = JwksCache()
+
+
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> str:
+    """Verify the bearer token and return the Clerk user id."""
+    if credentials is None or not credentials.credentials:
+        raise _unauthorized("Missing bearer token.")
+
+    token = credentials.credentials
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except JWTError as exc:
+        raise _unauthorized("Malformed token.") from exc
+
+    kid = header.get("kid")
+    if not kid:
+        raise _unauthorized("Token header is missing a key id.")
+
+    key = await jwks_cache.get_key(kid, settings.jwks_url)
+
+    try:
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            issuer=settings.clerk_jwt_issuer,
+            # Clerk session tokens carry `azp`, not `aud`.
+            options={"verify_aud": False},
+        )
+    except ExpiredSignatureError as exc:
+        raise _unauthorized("Token has expired.") from exc
+    except JWTError as exc:
+        # Deliberately vague: never echo token contents back to the caller.
+        raise _unauthorized("Token failed verification.") from exc
+
+    user_id = claims.get("sub")
+    if not user_id:
+        raise _unauthorized("Token is missing the sub claim.")
+
+    return str(user_id)
+
+
+CurrentUser = Annotated[str, Depends(get_current_user)]
+
+
+def get_supabase_client(
+    _user_id: CurrentUser,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Client:
+    """A per-request Supabase client that acts as the calling user.
+
+    The caller's JWT goes out on every PostgREST request, so Postgres sees
+    `request.jwt.claims` and applies the RLS policies. We use the anon key here
+    on purpose: the service role key would bypass RLS entirely.
+
+    Depends on `get_current_user` so the token is always verified before we
+    build a client with it.
+    """
+    if credentials is None:  # pragma: no cover — get_current_user already 401s
+        raise _unauthorized("Missing bearer token.")
+
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_anon_key,
+        options=ClientOptions(
+            headers={"Authorization": f"Bearer {credentials.credentials}"},
+            # We manage tokens ourselves; don't let a per-request client start
+            # background refresh timers or try to persist a session.
+            auto_refresh_token=False,
+            persist_session=False,
+        ),
+    )
+
+
+SupabaseClient = Annotated[Client, Depends(get_supabase_client)]
