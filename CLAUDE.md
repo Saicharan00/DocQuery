@@ -22,6 +22,7 @@ Multi-model RAG chat over user-uploaded documents. Next.js on Vercel + FastAPI o
 - Don't invent scope. If BUILD.md doesn't mention it, ask.
 - If something looks broken or wrong, say so and stop. Don't silently pick a different approach.
 - If you don't know something, say so. Don't fabricate library APIs, Clerk claims, or Supabase behavior.
+- before every day starts inform the user to use the plan mode to create plan and then do the coding or working part, by this user(me) can understand whats going on and leanr why we are doing it.
 
 ---
 
