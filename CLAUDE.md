@@ -23,6 +23,7 @@ Multi-model RAG chat over user-uploaded documents. Next.js on Vercel + FastAPI o
 - If something looks broken or wrong, say so and stop. Don't silently pick a different approach.
 - If you don't know something, say so. Don't fabricate library APIs, Clerk claims, or Supabase behavior.
 - before every day starts inform the user to use the plan mode to create plan and then do the coding or working part, by this user(me) can understand whats going on and leanr why we are doing it.
+- In this process before doing any step in each day you should clearly tell me what we are doing, why we are doing and how we are doing so that i can understand and learn whats happening. remember i know nothing and i am learning now along this project
 
 ---
 
