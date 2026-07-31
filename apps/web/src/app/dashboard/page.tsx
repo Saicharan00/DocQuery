@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
+import { DocumentList } from "@/components/document-list";
+import { UploadZone } from "@/components/upload-zone";
 import { AuthNotReadyError, useApi } from "@/lib/api";
 import type { Document } from "@/lib/types";
 
@@ -71,23 +73,28 @@ export default function DashboardPage() {
       {!data && !error && <p>Loading…</p>}
       {data && <p>User ID (from API): {data.user_id}</p>}
 
-      {/* Raw output on purpose: this is the instrument that proves Supabase
-          accepts the Clerk token and RLS runs. Replaced by the real document
-          list UI once upload and delete exist. */}
-      <section className="mt-8 border-t pt-4">
-        <h2 className="font-medium mb-2">Documents</h2>
-        {documentsError && (
-          <p className="text-red-600">Error: {documentsError}</p>
-        )}
-        {!documents && !documentsError && <p>Loading documents…</p>}
-        {documents && (
-          <>
-            <p>{documents.length} document(s)</p>
-            <pre className="mt-2 text-xs bg-neutral-100 dark:bg-neutral-900 p-2 rounded overflow-x-auto">
-              {JSON.stringify(documents, null, 2)}
-            </pre>
-          </>
-        )}
+      <section className="mt-8 border-t pt-6">
+        <h2 className="font-medium mb-3">Documents</h2>
+
+        {/* Both children get `refreshDocuments`: a finished upload or delete
+            re-fetches rather than editing the list locally, so what you see is
+            what the server actually has. It is also the call Day 6 will poll
+            to watch pending -> processing -> ready. */}
+        <UploadZone onUploaded={refreshDocuments} />
+
+        <div className="mt-6">
+          {documentsError && (
+            <p role="alert" className="text-sm text-destructive">
+              Error: {documentsError}
+            </p>
+          )}
+          {!documents && !documentsError && (
+            <p className="text-sm text-muted-foreground">Loading documents…</p>
+          )}
+          {documents && (
+            <DocumentList documents={documents} onDeleted={refreshDocuments} />
+          )}
+        </div>
       </section>
     </main>
   );
