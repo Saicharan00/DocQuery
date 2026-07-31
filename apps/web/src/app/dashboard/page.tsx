@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
-import { useApi } from "@/lib/api";
+import { AuthNotReadyError, useApi } from "@/lib/api";
 
 export default function DashboardPage() {
   const { user } = useUser();
@@ -11,9 +11,26 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api("/me")
-      .then(setData)
-      .catch((e: Error) => setError(e.message));
+    // Guards against a response landing after the component has gone away.
+    let cancelled = false;
+
+    api<{ user_id: string }>("/me")
+      .then((result) => {
+        if (cancelled) return;
+        setData(result);
+        setError(null); // Clear anything left over from an earlier attempt.
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        // Clerk wasn't ready yet. The effect re-runs once it is — nothing to
+        // show the user in the meantime.
+        if (e instanceof AuthNotReadyError) return;
+        setError(e.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [api]);
 
   return (
