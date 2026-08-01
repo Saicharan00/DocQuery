@@ -240,22 +240,50 @@ pinned **0.51.0**. Same class of bug, visible on my own machine.
 Fallback if it ever recurs: `.venv/bin/uvicorn ...`, which needs no `uv` at
 runtime.
 
-### 18. A silent no-op delete that would have orphaned files
+### 18. A guard I added, merged, and reverted — for a bug that never existed
 
-Found while investigating whether a deleted file was still in the bucket.
-Supabase's delete-object endpoint answers **200 with the list of objects it
-actually deleted**. If nothing matches, that list comes back **empty** —
-success status, nothing deleted, no exception raised.
+This one is kept in full because the mistake is more instructive than the code.
 
-The original `DELETE /documents/{id}` never checked that list. A no-op would
-have sailed through, deleted the database row, and returned `204` as though it
-worked — producing precisely the orphan the storage-then-row ordering exists
-to prevent. Now an empty result raises 502 *before* the row is touched, so the
-document stays in the list and the delete can be retried.
+**The trigger.** I asked whether delete had removed both the file and the row.
+The answer came back as "C refreshes in document but not in storage." I read
+that as *the app's list*, concluded a file had been left in the bucket, and
+started hunting an orphan.
 
-The live path was working correctly; this is hardening against a case that
-hadn't been hit. Worth noting that the bug was in the *absence* of a check,
-not in anything the code did — the easiest kind to miss.
+**The theory.** Supabase's delete-object endpoint answers 200 with a list of
+the objects it deleted. I reasoned that an empty list would mean a no-op —
+success status, nothing deleted, no exception — and that
+`DELETE /documents/{id}` never checked it, so a no-op would delete the row
+anyway and strand the file. I added a guard raising 502 on an empty list, and
+merged it.
+
+**Two things wrong with that.**
+
+1. There was no orphan. The file *had* been deleted; the Supabase **Storage
+   browser page was showing a cached view**. A SQL query against
+   `storage.objects` showed the truth immediately — and I only ran it after
+   writing the fix.
+2. I never verified what `remove()` actually returns on a *successful* delete.
+   I inferred "list of deleted objects" from a type annotation
+   (`list[dict[str, Any]]`) and built a hard failure condition on top of it. If
+   Supabase returns an empty array on success, that guard breaks every delete.
+
+**Then it got worse.** A later report — "I need to refresh in documents to get
+the updated list" — I again read as the app. Since the guard was the only
+recent code change, I blamed it and reverted it. That report *also* meant the
+Supabase dashboard, not the app. The app had been working the whole time. So
+the revert was unnecessary too.
+
+**Where it ended.** The guard is off `main`, and staying off. Not because it
+caused the second problem (it didn't), but because its justification was never
+established. Delete is verified working end to end. If orphan protection is
+ever genuinely wanted, the honest version confirms the object is gone with a
+follow-up existence check rather than trusting a return shape I'd be guessing
+at.
+
+**The actual lesson**, which has nothing to do with storage APIs: *establish
+which screen a symptom is on before touching code.* Both false alarms came from
+the same ambiguity — our app versus the Supabase dashboard — and both cost a
+merge. A single clarifying question would have prevented all of it.
 
 ---
 
@@ -264,7 +292,9 @@ not in anything the code did — the easiest kind to miss.
 ### 19. What each check actually proved
 
 - [x] **Upload a PDF** → row in `documents`, file under `{user_id}/` in Storage
-- [x] **List renders and refreshes** without a manual page reload
+- [x] **List renders and refreshes** without a manual page reload — confirmed
+      for upload *and* delete. This one was wrongly reported as failing twice;
+      both times the stale screen was the Supabase dashboard, not the app (§18)
 - [x] **Delete removes both halves** — row *and* Storage object
 - [x] **Second user sees an empty list** — the one that matters
 - [x] **API is fail-closed** — `/health` 200 without a token; `/documents`,
@@ -305,13 +335,22 @@ which is why it's the one box left unticked above.
 
 ## Gotchas worth remembering
 
-- **The Supabase Storage browser caches hard.** It showed a file as still
-  present after it had been deleted, which nearly sent me hunting a bug that
-  didn't exist. The truth is a SQL query — `storage.objects` is a real table:
+- **The Supabase dashboard does not live-update — neither the Storage browser
+  nor the Table Editor.** Both run their query when you open or navigate to the
+  page and then sit on that result. Whether a change "appears" tracks whether
+  you navigated back to the tab, not what the app did. This caused *two*
+  separate false bug reports on Day 5 (§18) and cost a merge and a revert.
+
+  Treat that dashboard as never authoritative for freshness. SQL is the truth:
   ```sql
+  select name, status, created_at from documents order by created_at desc;
+
   select name, created_at from storage.objects
   where bucket_id = 'documents' order by created_at desc;
   ```
+- **Before debugging any "it doesn't refresh" symptom, establish which screen
+  it's on** — our app, or the Supabase dashboard. Asking that one question
+  first would have saved every wasted step described in §18.
 - **In PowerShell, `curl` is an alias for `Invoke-WebRequest`,** not real curl.
   It rejects `-X` and `-F` with confusing parameter errors. Use `curl.exe`
   (the genuine one at `C:\Windows\System32\curl.exe`).
