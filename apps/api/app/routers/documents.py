@@ -229,28 +229,13 @@ async def delete_document(
     file_path = found.data[0]["file_path"]
 
     try:
-        removed = supabase.storage.from_(BUCKET).remove([file_path])
+        supabase.storage.from_(BUCKET).remove([file_path])
     except Exception as exc:
         logger.exception("Storage delete failed for %s", file_path)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not delete the file. Please try again.",
         ) from exc
-
-    # Storage answers 200 with the list of objects it actually deleted, so an
-    # empty list is a no-op dressed as a success — nothing matched, and the
-    # object is still there. Without this check we would delete the row next
-    # and orphan the file: still costing storage, no longer referenced by
-    # anything, invisible to every UI. Keeping the row makes it retryable.
-    if isinstance(removed, list) and not removed:
-        logger.error(
-            "Storage deleted nothing for %s; keeping the row so it can be retried",
-            file_path,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not delete the file. Please try again.",
-        )
 
     try:
         supabase.table("documents").delete().eq("id", str(document_id)).execute()
