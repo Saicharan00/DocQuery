@@ -29,4 +29,24 @@ class DocumentOut(BaseModel):
     status: DocumentStatus
     file_size: int | None = None
     mime_type: str | None = None
+    error: str | None = None
     created_at: datetime
+
+
+class IngestStepOut(BaseModel):
+    """The result of one ingestion step.
+
+    `done` is what the browser loops on: false means call again with a fresh
+    token. The two counts exist so the UI can show progress without a second
+    request — the step already knows them.
+    """
+
+    done: bool
+    chunks_done: int
+    chunks_total: int
+    status: DocumentStatus
+    # Which page the last stored chunk came from, and how many the document has.
+    # Both come from `chunks.page_number`, which exists for citations later —
+    # this reuses it to show what is being read right now.
+    page: int
+    pages: int
