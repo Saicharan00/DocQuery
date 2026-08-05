@@ -33,16 +33,16 @@ Multi-model RAG chat over user-uploaded documents. Next.js on Vercel + FastAPI o
 - **Backend**: FastAPI → Railway
 - **Auth**: Clerk (single-user, no orgs)
 - **DB + vectors + storage**: Supabase (Postgres + pgvector + Storage)
-- **LLM routing**: LiteLLM
-- **Embeddings**: OpenAI `text-embedding-3-small` (1536 dim)
-- **Parsing**: PyMuPDF (PDF), python-docx (DOCX), builtin (TXT)
+- **LLM routing**: LiteLLM — **chat only**. Embeddings call the Cohere SDK directly.
+- **Embeddings**: Cohere `embed-v4` (1536 dim) — text *and* images in one shared vector space (changed 2026-08-03; was OpenAI `text-embedding-3-small`)
+- **Parsing**: PyMuPDF (PDF text + page-region images), python-docx (DOCX), builtin (TXT)
 - **Chunking**: `RecursiveCharacterTextSplitter`, 800 tokens, 100 overlap
 - **Observability**: LangSmith
 - **Eval**: custom script + RAGAS
 
 ## Non-goals (v1)
 
-No orgs. No Stripe. No local LLM / Ollama. No desktop app. No hosted API keys — user pastes their own.
+No orgs. No Stripe. No local LLM / Ollama. No desktop app. No BYOK — dropped 2026-08-03; nobody pastes a personal API key into a stranger's portfolio site. **I fund every call from my own keys**, so the app is a rate-limited live demo: per-user daily caps plus a global kill switch. Cost is now a design constraint, not the visitor's problem.
 
 ---
 
