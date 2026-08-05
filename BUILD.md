@@ -199,6 +199,14 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 **Goal:** Uploaded docs become searchable chunks with embeddings.
 
+> **Scope changed 2026-08-03 — images are in.** This day was written text-only. It now
+> also extracts images from PDFs, embeds them into the *same* vector space as the text
+> (Cohere `embed-v4`), and stores them in Supabase Storage so Day 7 can return them
+> beside the answer. Cost: Day 6 becomes ~1.5–2 days and it touches Day 7 (vision model)
+> and Day 11 (eval questions answered only by a figure). Needs migration 003:
+> `documents.error`, and `chunks.chunk_type` / `image_path` / `page_number`.
+> The step list below is the old text-only version — the real one comes out of plan mode.
+
 ### Steps
 
 1. Deps: `pymupdf`, `python-docx`, `langchain-text-splitters`, `tiktoken`. (LiteLLM already installed.)
@@ -206,12 +214,12 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    - `download_from_storage(file_path) -> bytes`
    - `parse(bytes, mime_type) -> str` — dispatch to PyMuPDF / python-docx / plain read
    - `chunk(text) -> list[Chunk]` — `RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100, length_function=<tiktoken counter>)`
-   - `embed(chunks) -> list[list[float]]` — `litellm.embedding(model="text-embedding-3-small", input=[...])`, batch requests
+   - `embed(chunks) -> list[list[float]]` — **Cohere SDK, not LiteLLM** (LiteLLM is for chat only): `cohere.ClientV2().embed(model="embed-v4.0", input_type="search_document", output_dimension=1536, embedding_types=["float"])`, batched
    - `ingest(document_id)` — orchestrates: update status → download → parse → chunk → embed → insert chunks → update status
-3. Trigger from `POST /documents/upload` via FastAPI `BackgroundTasks`.
+3. **No `BackgroundTasks`.** A background job outlives its Clerk token (~60s) and RLS depends on that token. Instead the **browser drives the work in steps**: `POST /documents/{id}/ingest/step` works ~45s, writes what it finished, returns `{done, chunks_done, chunks_total}`; the browser calls again with a fresh token until `done`. Resume point is `max(chunk_index)`, so chunking must be deterministic. No service-role key, and ingestion is resumable if the tab closes.
 4. Status transitions: `pending` → `processing` → `ready` | `failed`. On failure, store the error message on the `documents` row (add an `error` column via a migration).
-5. Frontend: poll `GET /documents` every 3s while any doc is `pending` or `processing`; show status badge.
-6. Add `OPENAI_API_KEY` to `.env.example` and Railway env.
+5. Frontend: drive the step loop and show progress from its responses — **no 3s polling**, the loop already knows where it is. Status badge stays.
+6. Add `COHERE_API_KEY` to `.env.example` and Railway env.
 
 ### Done when
 
@@ -237,11 +245,15 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    - Retrieve, build prompt, call `litellm.completion(model=model, messages=prompt, stream=True)`.
    - Stream tokens via SSE (`text/event-stream`).
    - After stream ends: save the user message + assistant message to `messages` table, with retrieved chunk metadata as `sources` JSON.
-3. Supported models (values the frontend can send):
-   - `gpt-4o-mini`
-   - `claude-3-5-haiku-20241022`
-   - `gemini/gemini-2.0-flash`
-4. Add `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` to `.env.example` + Railway.
+3. Supported models (values the frontend can send). **Two of the original three are dead**
+   — `claude-3-5-haiku-20241022` retired 2026-02-19, `gemini/gemini-2.0-flash` shut down
+   2026-06-01. Proposed replacements, one per provider so the LiteLLM story still holds.
+   All three must be vision-capable (images now reach the model) — **verify each against
+   its provider docs on Day 7, don't assume**:
+   - `gpt-5.4-nano` — $0.20 / $1.25 per 1M tokens
+   - `gemini/gemini-2.5-flash-lite` — $0.10 / $0.40 — **default**, since I pay per question
+   - `claude-haiku-4-5-20251001` — $1 / $5, ~10× the default
+4. Add `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` to `.env.example` + Railway.
 
 ### Done when
 
@@ -380,7 +392,7 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 1. **README.md** (top-level, replaces the auto-generated one):
    - Title + one-line pitch
    - Screenshot or GIF at the very top
-   - **Live demo link** + BYOK instructions ("Get an OpenAI/Anthropic/Gemini API key here, paste in Settings, upload a doc, chat")
+   - **Live demo link** — no key needed, it's a rate-limited demo on my keys ("sign in, upload a doc, chat"). State the daily caps honestly.
    - **Architecture diagram** — Mermaid, showing: Browser → Vercel (Next.js) → Railway (FastAPI) → Supabase (Postgres + pgvector + Storage) + LangSmith side-branch + LiteLLM → OpenAI/Anthropic/Gemini
    - **Tech stack** with one-line "why" per choice
    - **Design decisions** — 3-4 paragraphs on:

@@ -9,6 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
+# Machine-local Claude Code state: per-machine settings and scratch worktrees.
+.claude/settings.local.json
+.claude/worktrees/
+
 # Real secrets — never commit. Keys live here at runtime.
 .env
 .env.local
