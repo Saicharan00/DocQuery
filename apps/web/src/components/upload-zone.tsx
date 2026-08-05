@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { AuthNotReadyError, useApi } from "@/lib/api";
 import type { Document } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,17 +24,27 @@ type UploadZoneProps = {
   onUploaded: () => void | Promise<void>;
 };
 
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function describeRejection(file: File): string | null {
   const name = file.name.toLowerCase();
 
   if (!ACCEPTED_EXTENSIONS.some((extension) => name.endsWith(extension))) {
-    return "Unsupported file type. Upload a PDF, DOCX, or TXT file.";
+    const extension = name.includes(".")
+      ? name.slice(name.lastIndexOf("."))
+      : "no extension";
+    return `“${file.name}” is a ${extension} file, which can't be read.`;
   }
+  // Named with the actual size, because "too large" alone leaves you guessing
+  // whether you missed by a little or a lot.
   if (file.size > MAX_FILE_BYTES) {
-    return "File is too large. The limit is 10MB.";
+    return `“${file.name}” is ${formatSize(file.size)}, over the 10 MB limit.`;
   }
   if (file.size === 0) {
-    return "That file is empty.";
+    return `“${file.name}” is empty — there is nothing in it to read.`;
   }
   return null;
 }
@@ -44,7 +55,14 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
 
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Rendered from state rather than via <dialog>.showModal(): a value here is
+  // on screen, with no browser API able to swallow it silently.
   const [error, setError] = useState<string | null>(null);
+
+  const reject = useCallback((message: string) => {
+    setError(message);
+  }, []);
 
   const upload = useCallback(
     async (files: FileList | null) => {
@@ -53,14 +71,14 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
       if (files.length > 1) {
         // The endpoint takes one file per request. Refusing is better than
         // quietly uploading one of several and leaving you to notice.
-        setError("One file at a time, please.");
+        reject(`You picked ${files.length} files. Upload one at a time.`);
         return;
       }
 
       const file = files[0];
       const rejection = describeRejection(file);
       if (rejection) {
-        setError(rejection);
+        reject(rejection);
         return;
       }
 
@@ -77,16 +95,19 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
         await api<Document>("/documents/upload", { method: "POST", body });
         await onUploaded();
       } catch (e) {
-        if (e instanceof AuthNotReadyError) {
-          setError("Still signing you in. Try again in a moment.");
-        } else {
-          setError((e as Error).message);
-        }
+        // Server-side refusals land here too — the daily cap (429) and the
+        // service ceiling (503) among them. They deserve the same visibility as
+        // a file that was wrong before it left the browser.
+        reject(
+          e instanceof AuthNotReadyError
+            ? "Still signing you in. Try again in a moment."
+            : (e as Error).message,
+        );
       } finally {
         setIsUploading(false);
       }
     },
-    [api, onUploaded],
+    [api, onUploaded, reject],
   );
 
   return (
@@ -155,10 +176,13 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
 
       {/* Outside the zone, not inside it: a programmatic .click() on the input
           would bubble up to the zone's own onClick and call .click() again. */}
+      {/* No `accept` filter on purpose. It makes the OS grey out everything
+          else, so picking a wrong file is impossible and you never learn what
+          the rules are. Better to let anything be chosen and say why it was
+          refused — the server validates regardless. */}
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPTED_EXTENSIONS.join(",")}
         className="hidden"
         onChange={(event) => {
           void upload(event.target.files);
@@ -169,9 +193,46 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
       />
 
       {error && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {error}
-        </p>
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-label="Upload refused"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          // Clicking the backdrop dismisses. The check keeps a click inside the
+          // panel from closing it as the event bubbles out.
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setError(null);
+          }}
+        >
+          <div className="w-full max-w-md rounded-lg border bg-background p-6 text-foreground shadow-lg">
+            <h2 className="text-base font-semibold">
+              {error.includes("limit reached")
+                ? "Daily upload limit reached"
+                : "Can't upload that file"}
+            </h2>
+
+            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+
+            <div className="mt-4 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+              <p className="mb-1.5 font-medium text-foreground">
+                What is accepted
+              </p>
+              <ul className="list-disc space-y-1 pl-4">
+                <li>PDF, DOCX or TXT</li>
+                <li>Up to 10 MB</li>
+                <li>One file at a time</li>
+                <li>Not empty — and a scanned PDF is pictures, not text</li>
+                <li>15 documents per day</li>
+              </ul>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <Button size="sm" onClick={() => setError(null)}>
+                Got it
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
