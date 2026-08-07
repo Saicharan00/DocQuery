@@ -156,6 +156,42 @@ async def get_current_user(
 CurrentUser = Annotated[str, Depends(get_current_user)]
 
 
+def get_token_expiry(
+    _user_id: CurrentUser,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> float:
+    """When the caller's token stops being valid, as a UNIX timestamp.
+
+    Long-running work needs this. Ingestion embeds for tens of seconds and every
+    write it makes rides on this token, so it has to know when its own credential
+    dies — otherwise it works to a guessed budget and Supabase rejects a write
+    partway through with `"exp" claim timestamp check failed`.
+
+    A guessed budget is not good enough because Clerk hands the browser a
+    *cached* token, refreshing only when it is nearly dead. A step can therefore
+    begin with 15 seconds of validity left, not the full 60.
+
+    Reading the claim without re-verifying is safe here: `get_current_user` is a
+    dependency of this function, so FastAPI has already checked this exact
+    token's signature, issuer and expiry before this line runs. Decoding again
+    would only repeat that work.
+    """
+    if credentials is None:  # pragma: no cover — get_current_user already 401s
+        raise _unauthorized("Missing bearer token.")
+
+    expires_at = jwt.get_unverified_claims(credentials.credentials).get("exp")
+    if expires_at is None:
+        # Fail closed. A token with no expiry cannot be reasoned about, and
+        # silently substituting a default would hand out a budget built on a
+        # number nobody set.
+        raise _unauthorized("Token is missing the exp claim.")
+
+    return float(expires_at)
+
+
+TokenExpiry = Annotated[float, Depends(get_token_expiry)]
+
+
 def get_supabase_client(
     _user_id: CurrentUser,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],

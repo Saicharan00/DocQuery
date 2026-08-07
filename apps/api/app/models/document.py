@@ -50,3 +50,6 @@ class IngestStepOut(BaseModel):
     # this reuses it to show what is being read right now.
     page: int
     pages: int
+    # How many of `chunks_total` are pictures rather than text. Without it the
+    # only evidence that image ingestion ran at all is a SQL query.
+    images_total: int = 0
