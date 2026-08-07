@@ -47,11 +47,17 @@ function describeProgress(step: IngestStep | undefined): string {
   const percent = percentOf(step) ?? 0;
   const chunks = `${step.chunks_done} of ${step.chunks_total} chunks embedded`;
 
-  // Pages are missing for formats without them (DOCX, TXT), so the sentence is
-  // built rather than templated — a stray "page 0 of 0" reads like a bug.
-  return step.pages > 0
-    ? `${percent}% · page ${step.page} of ${step.pages} · ${chunks}`
-    : `${percent}% · ${chunks}`;
+  // Pages are missing for formats without them (DOCX, TXT), and most documents
+  // have no figures at all, so the sentence is built rather than templated — a
+  // stray "page 0 of 0" or "0 images" reads like a bug.
+  const parts = [`${percent}%`];
+  if (step.pages > 0) parts.push(`page ${step.page} of ${step.pages}`);
+  parts.push(chunks);
+  if (step.images_total > 0) {
+    parts.push(`${step.images_total} ${step.images_total === 1 ? "image" : "images"}`);
+  }
+
+  return parts.join(" · ");
 }
 
 /**

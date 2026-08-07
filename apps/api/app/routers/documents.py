@@ -22,7 +22,7 @@ from cohere.errors import TooManyRequestsError
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.config import get_settings
-from app.deps import CurrentUser, SupabaseClient
+from app.deps import CurrentUser, SupabaseClient, TokenExpiry
 from app.models.document import DocumentOut, IngestStepOut
 from app.services import ingestion
 
@@ -44,12 +44,15 @@ ALLOWED_EXTENSIONS: dict[str, str] = {
 MAX_FILE_BYTES = 10 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
-# How long one ingestion step is allowed to work before returning and asking the
-# browser to call again. A Clerk session token lives about 60 seconds, and every
-# write here depends on that token being valid — so a step has to finish well
-# inside one token's life. The remaining ~15s covers the round trip and the final
-# status write.
+# The longest one ingestion step may work before returning and asking the browser
+# to call again. It is a ceiling, not the budget: the real budget is whichever is
+# smaller, this or the time left on the caller's token (see `ingest_step`).
 STEP_BUDGET_SECONDS = 45
+
+# Subtracted from the token's remaining life so a step stops before its
+# credential expires rather than exactly as it does. Covers the last database
+# write, the status update, and any clock difference between us and Supabase.
+TOKEN_SAFETY_MARGIN_SECONDS = 5
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -275,6 +278,86 @@ def _set_status(
     ).execute()
 
 
+def _items(data: bytes, mime_type: str | None) -> list[ingestion.Chunk]:
+    """Everything to be embedded for this document, text first, images after.
+
+    The order is load-bearing, not cosmetic. A step resumes from the highest
+    `chunk_index` already stored, so images must continue the text's numbering
+    and never sit among it: appending them means a resumed step never
+    re-renders a picture it already stored, and `max(chunk_index)` keeps meaning
+    exactly what it meant on Day 6a.
+
+    Both halves are deterministic — `chunk` by construction, `find_images` by
+    sorting boxes into reading order — which is what makes an index refer to the
+    same thing on every call.
+
+    ponytail: every step re-parses and re-renders the whole document, including
+    the pictures it already stored. Measured at 0.6s for a 12-image report,
+    against a 45s budget. Skip the rendering of anything below `resume_from` if
+    a document ever makes that hurt.
+    """
+    chunks = ingestion.chunk(ingestion.parse(data, mime_type))
+
+    return chunks + [
+        ingestion.Chunk(
+            index=len(chunks) + offset,
+            # A label, not the thing being embedded. `chunks.content` is
+            # `not null`, and Day 8 can show this next to a picture.
+            content=f"[Image from page {region.page_number}]",
+            page_number=region.page_number,
+            token_count=0,
+            image=region.jpeg,
+        )
+        for offset, region in enumerate(ingestion.find_images(data, mime_type))
+    ]
+
+
+def _batches(items: list[ingestion.Chunk]):
+    """Split into runs of one kind, each no larger than that kind's batch size.
+
+    Text and pictures cannot travel in the same Cohere call — `embed(texts=…)`
+    and `embed(images=…)` are separate requests — so a batch that straddled the
+    boundary would be impossible to send. Images also batch far smaller: 96
+    JPEGs would blow past the 20MB-per-request ceiling.
+    """
+    start = 0
+
+    while start < len(items):
+        is_image = items[start].image is not None
+        size = (
+            ingestion.IMAGE_EMBED_BATCH_SIZE if is_image else ingestion.EMBED_BATCH_SIZE
+        )
+        end = start
+
+        while (
+            end < len(items)
+            and end - start < size
+            and (items[end].image is not None) == is_image
+        ):
+            end += 1
+
+        yield items[start:end]
+        start = end
+
+
+def _token_expired(exc: Exception) -> bool:
+    """True when Supabase refused a call because the caller's JWT had expired.
+
+    This belongs in the same category as a rate limit, not in the same category
+    as a corrupt file: it is temporary, and the next step arrives with a freshly
+    minted token. Treating it as fatal marks a perfectly good document `failed`
+    for a condition that fixes itself in seconds.
+
+    Matched on the message because Storage and PostgREST raise different
+    exception types for the identical underlying condition, and neither exposes
+    the reason as a field. Deliberately narrow: a looser match would swallow a
+    genuine authorisation failure and stall a document that should have failed
+    loudly.
+    """
+    text = str(exc)
+    return '"exp" claim' in text or "JWT expired" in text
+
+
 # Deliberately `def`, not `async def`. Embedding is a blocking network call
 # repeated for up to 45 seconds; inside an `async def` that would freeze the
 # entire API for every other user while one document ingests. FastAPI runs a
@@ -283,6 +366,7 @@ def _set_status(
 def ingest_step(
     user_id: CurrentUser,
     supabase: SupabaseClient,
+    expires_at: TokenExpiry,
     document_id: UUID,
 ) -> IngestStepOut:
     """Do one slice of ingestion, then hand control back to the browser.
@@ -298,6 +382,22 @@ def ingest_step(
     call resumes from there. And re-calling this on a `failed` document retries
     it, keeping whatever it managed to write the first time.
     """
+    # Started here rather than at the embedding loop so the budget covers the
+    # whole request — the download and parse happen on the same token's clock.
+    started = time.monotonic()
+
+    # The real budget: never longer than the ceiling, and never past the moment
+    # this request's own token dies. Clerk caches tokens and refreshes them only
+    # when they are nearly spent, so a step can arrive holding far less than a
+    # full token's life; working to a fixed 45s got a write rejected mid-step
+    # with `"exp" claim timestamp check failed`. `expires_at` is wall-clock, so
+    # it is compared against `time.time()` once, here — everything after this
+    # measures elapsed time with the monotonic clock, which cannot jump.
+    budget = min(
+        STEP_BUDGET_SECONDS,
+        expires_at - time.time() - TOKEN_SAFETY_MARGIN_SECONDS,
+    )
+
     try:
         found = (
             supabase.table("documents")
@@ -355,18 +455,32 @@ def ingest_step(
         resume_from = highest.data[0]["chunk_index"] + 1 if highest.data else 0
 
         data = ingestion.download(supabase, document["file_path"])
-        chunks = ingestion.chunk(ingestion.parse(data, document["mime_type"]))
+        mime_type = document["mime_type"]
+        chunks = _items(data, mime_type)
+
+        if not chunks:
+            # Neither text nor pictures. Only here can that be judged: a scanned
+            # PDF has no text either, and it is now perfectly ingestible.
+            raise ValueError(
+                "Nothing could be read from this file — no text and no images."
+            )
+
         total = len(chunks)
+        images_total = sum(1 for item in chunks if item.image)
         remaining = chunks[resume_from:]
 
-        started = time.monotonic()
+        bucket = supabase.storage.from_(BUCKET)
         written = resume_from
 
-        for offset in range(0, len(remaining), ingestion.EMBED_BATCH_SIZE):
-            batch = remaining[offset : offset + ingestion.EMBED_BATCH_SIZE]
+        for batch in _batches(remaining):
+            is_image = batch[0].image is not None
 
             try:
-                vectors = ingestion.embed([item.content for item in batch])
+                vectors = (
+                    ingestion.embed_images([item.image for item in batch])
+                    if is_image
+                    else ingestion.embed([item.content for item in batch])
+                )
             except TooManyRequestsError:
                 # Not a failure — the embedding provider is saying "slower".
                 # End the step with whatever is already written and let the
@@ -380,25 +494,61 @@ def ingest_step(
                 )
                 break
 
-            supabase.table("chunks").insert(
-                [
-                    {
-                        # From the verified token, not from the document row.
-                        # RLS checks this value against the token anyway, and
-                        # copying it from the row would be a habit that turns
-                        # dangerous on any path RLS doesn't cover.
-                        "user_id": user_id,
-                        "document_id": str(document_id),
-                        "content": item.content,
-                        "embedding": vector,
-                        "chunk_index": item.index,
-                        "token_count": item.token_count,
-                        "page_number": item.page_number,
-                        "chunk_type": "text",
-                    }
-                    for item, vector in zip(batch, vectors)
-                ]
-            ).execute()
+            rows = []
+
+            try:
+                for item, vector in zip(batch, vectors):
+                    image_path = None
+
+                    if item.image:
+                        # File first, row second — the same order as
+                        # `upload_document`, for the same reason: a row pointing
+                        # at a file that was never written is a broken document
+                        # that looks fine. The path is derived from the chunk
+                        # index rather than being random, so a replayed step
+                        # overwrites its own file instead of leaving a duplicate.
+                        # `foldername(...)[1]` is still the user id, so the
+                        # storage policy from 001_init.sql passes unchanged.
+                        image_path = f"{user_id}/{document_id}/img-{item.index}.jpg"
+                        bucket.upload(
+                            path=image_path,
+                            file=item.image,
+                            file_options={
+                                "content-type": "image/jpeg",
+                                "upsert": "true",
+                            },
+                        )
+
+                    rows.append(
+                        {
+                            # From the verified token, not from the document row.
+                            # RLS checks this value against the token anyway, and
+                            # copying it from the row would be a habit that turns
+                            # dangerous on any path RLS doesn't cover.
+                            "user_id": user_id,
+                            "document_id": str(document_id),
+                            "content": item.content,
+                            "embedding": vector,
+                            "chunk_index": item.index,
+                            "token_count": item.token_count,
+                            "page_number": item.page_number,
+                            "chunk_type": "image" if item.image else "text",
+                            "image_path": image_path,
+                        }
+                    )
+
+                supabase.table("chunks").insert(rows).execute()
+            except Exception as exc:
+                if not _token_expired(exc):
+                    raise
+                # The budget above should prevent this, but clock skew and a
+                # slow final batch can still get us here. Same treatment as a
+                # rate limit: keep what is written, stay `processing`, and let
+                # the browser return with a fresh token.
+                logger.warning(
+                    "Token expired mid-step at chunk %s of %s", written, total
+                )
+                break
 
             written += len(batch)
 
@@ -410,7 +560,7 @@ def ingest_step(
             # full budget. Nothing can be drawn until a step comes back with the
             # totals, and spending 45 seconds before revealing them leaves the
             # page looking frozen. One extra round trip buys immediate feedback.
-            if resume_from == 0 or time.monotonic() - started > STEP_BUDGET_SECONDS:
+            if resume_from == 0 or time.monotonic() - started > budget:
                 break
 
         done = written >= total
@@ -427,6 +577,7 @@ def ingest_step(
             # anything was written at all.
             page=chunks[written - 1].page_number if written else 0,
             pages=max((item.page_number for item in chunks), default=0),
+            images_total=images_total,
         )
 
     except Exception as exc:
@@ -497,10 +648,36 @@ async def delete_document(
 
     file_path = found.data[0]["file_path"]
 
+    # The images Day 6b cropped out of this document. They are separate Storage
+    # objects with nothing cascading to them, so without this every delete
+    # leaves its pictures in the bucket forever — paid for, and listed nowhere.
+    # Bounded by MAX_IMAGES_PER_DOCUMENT, and RLS scopes the select as always.
+    #
+    # ponytail: this finds the images that made it into a row. A step that died
+    # between uploading a JPEG and inserting its row leaves that one file
+    # behind. Listing the folder prefix would catch those too — revisit if
+    # orphans ever actually show up.
     try:
-        supabase.storage.from_(BUCKET).remove([file_path])
+        stored = (
+            supabase.table("chunks")
+            .select("image_path")
+            .eq("document_id", str(document_id))
+            .not_.is_("image_path", "null")
+            .execute()
+        )
     except Exception as exc:
-        logger.exception("Storage delete failed for %s", file_path)
+        logger.exception("Could not list image files for document %s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not delete the document. Please try again.",
+        ) from exc
+
+    paths = [file_path] + [row["image_path"] for row in stored.data]
+
+    try:
+        supabase.storage.from_(BUCKET).remove(paths)
+    except Exception as exc:
+        logger.exception("Storage delete failed for %s (%s objects)", file_path, len(paths))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Could not delete the file. Please try again.",
