@@ -31,4 +31,6 @@ export interface IngestStep {
   page: number;
   /** Pages in the document. 0 when the server had no reason to work it out. */
   pages: number;
+  /** How many of `chunks_total` are pictures rather than text. */
+  images_total: number;
 }

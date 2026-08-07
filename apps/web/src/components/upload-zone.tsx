@@ -221,7 +221,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
                 <li>PDF, DOCX or TXT</li>
                 <li>Up to 10 MB</li>
                 <li>One file at a time</li>
-                <li>Not empty — and a scanned PDF is pictures, not text</li>
+                <li>Not empty — a scanned PDF is fine, its pages are read as pictures</li>
                 <li>15 documents per day</li>
               </ul>
             </div>

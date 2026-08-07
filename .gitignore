@@ -22,3 +22,6 @@ wheels/
 # ...but DO commit the empty-placeholder template.
 !.env.example
 
+
+# Throwaway output from scripts/inspect_images.py.
+crops/
