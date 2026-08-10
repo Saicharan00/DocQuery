@@ -1,17 +1,30 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The single .env at the repo root, mirroring .env.example beside it — one file
+# for both apps rather than a copy of the same secrets per app.
+#
+# Anchored to this file's own location, not to `.env` as a bare relative path.
+# A relative path resolves against the working directory, so it only worked when
+# uvicorn happened to be launched from the repo root and silently reported every
+# field as "missing" from anywhere else. Railway hid this completely: it injects
+# real environment variables, so no file is ever read there.
+#
+# config.py -> app -> api -> apps -> <repo root>
+ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class Settings(BaseSettings):
     """Every env var the API reads, in one place.
 
-    Values come from the process environment (Railway) or a local .env file.
+    Values come from the process environment (Railway) or the local .env file.
     Never log or echo these — see the secrets rules in CLAUDE.md.
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
