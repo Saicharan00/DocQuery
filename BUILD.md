@@ -8,7 +8,9 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 ## Project pitch (one line)
 
-> Multi-model RAG chat over your documents. Upload PDFs, DOCX, or TXT. Pick your model. Bring your own key. Answers cite their sources.
+> Multi-model RAG chat over your documents. Upload PDFs, DOCX, or TXT. Pick your model. Answers cite their sources — with the figures they came from.
+
+*(BYOK dropped 2026-08-03. It is a rate-limited live demo running on my own keys: per-user daily caps plus a global kill switch. Cost is a design constraint, not the visitor's problem.)*
 
 ---
 
@@ -233,6 +235,22 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 **Goal:** Chat endpoint that retrieves and generates streaming answers.
 
+> **Scope settled 2026-08-07.** Four decisions, each with its reason:
+>
+> - **Single-turn only.** No conversation history in the prompt. History *and* query
+>   rewriting move to Day 9 — see the note there. Deferred not for scope but because the
+>   feature is worth more once Day 11 can measure the failure it fixes.
+> - **Images reach the model.** A retrieved chunk with `chunk_type='image'` has its JPEG
+>   pulled from Storage and sent as an image part. Its `content` is only the label
+>   `[Image from page N]`, so sending text alone would tell the model nothing and waste
+>   everything Day 6b built.
+> - **Spend cap on `/chat`**, mirroring `_enforce_daily_limit` in `documents.py`. Chat is
+>   unlimited and cheap per call, which makes it the easiest endpoint to run up a bill on.
+> - **Migration 005 is unavoidable.** PostgREST has no syntax for
+>   `ORDER BY embedding <=> $1`, so vector search must be a SQL function called via
+>   `.rpc()`. It must **not** be `security definer` — unlike `004`, RLS is exactly what
+>   we need it to keep.
+
 ### Steps
 
 1. `apps/api/app/services/rag.py`:
@@ -245,14 +263,24 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    - Retrieve, build prompt, call `litellm.completion(model=model, messages=prompt, stream=True)`.
    - Stream tokens via SSE (`text/event-stream`).
    - After stream ends: save the user message + assistant message to `messages` table, with retrieved chunk metadata as `sources` JSON.
-3. Supported models (values the frontend can send). **Two of the original three are dead**
-   — `claude-3-5-haiku-20241022` retired 2026-02-19, `gemini/gemini-2.0-flash` shut down
-   2026-06-01. Proposed replacements, one per provider so the LiteLLM story still holds.
-   All three must be vision-capable (images now reach the model) — **verify each against
-   its provider docs on Day 7, don't assume**:
-   - `gpt-5.4-nano` — $0.20 / $1.25 per 1M tokens
-   - `gemini/gemini-2.5-flash-lite` — $0.10 / $0.40 — **default**, since I pay per question
-   - `claude-haiku-4-5-20251001` — $1 / $5, ~10× the default
+3. Supported models. The two dead ones (`claude-3-5-haiku-20241022`, retired 2026-02-19;
+   `gemini/gemini-2.0-flash`, shut down 2026-06-01) are replaced below. **All three
+   verified against provider docs 2026-08-07** — pricing current, all vision-capable:
+
+   | Model | $/1M in – out | Notes |
+   |---|---|---|
+   | `gemini/gemini-2.5-flash-lite` | 0.10 / 0.40 | **default** — I pay per question |
+   | `gpt-5.4-nano` | 0.20 / 1.25 | |
+   | `claude-haiku-4-5-20251001` | 1.00 / 5.00 | ~10× the default |
+
+   One per provider, so the LiteLLM abstraction is actually exercised rather than claimed.
+
+   ⚠️ **`gemini-2.5-flash-lite` shuts down 16 Oct 2026.** Its successor
+   `gemini-3.5-flash-lite` is $0.30 / $2.50 — 3× input, 6× output. The swap is one line in
+   `SUPPORTED_MODELS`; do it before that date or the default model 404s.
+
+   The model list is an **allowlist enforced in the request schema**. Without it a caller
+   names any model they like and spends my money on it.
 4. Add `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` to `.env.example` + Railway.
 
 ### Done when
@@ -308,6 +336,16 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    - `DELETE /conversations/{id}` (cascades to messages)
 3. Auto-title new conversations after the first user message: fire-and-forget LiteLLM call with a cheap model ("Summarize this in 4 words: <first message>"), update conversation.title.
 4. Chat page: on mount, if URL has a `conversation_id`, load its messages.
+5. **Conversation history + query rewriting** — deferred here from Day 7.
+   - Send the last **3 turns of message text** to the model. Never re-send the chunks those
+     turns retrieved: they are already baked into the answers, and re-sending them is the
+     version that genuinely costs money (~+19% input with text only; several times that
+     with chunks).
+   - **Rewriting is the hard half.** A follow-up like *"what about the second one?"* gets
+     embedded literally, and those words appear nowhere near the answer — so retrieval
+     returns nothing useful while the answer still reads fluently. Fix: one cheap LLM call
+     that rewrites the follow-up into a standalone question *before* embedding it.
+   - Day 11 measures both, which is the whole reason this waited.
 
 ### Done when
 
@@ -315,6 +353,7 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 - [ ] Rename a conversation.
 - [ ] Delete a conversation.
 - [ ] First user message → conversation title auto-updates within a few seconds.
+- [ ] A follow-up ("what about the second one?") retrieves the right chunks, not noise.
 
 ---
 
@@ -352,34 +391,125 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 ---
 
-## Day 11 — Evaluation ⭐
+## Day 11 — Evaluation ⭐ (two days)
 
 **Goal:** Prove the RAG pipeline actually works. This is the interview-gold day.
 
+> **Expanded 2026-08-07 from 3 metrics to 11.** The original three measured only whether the
+> *answer* was good. They could not tell you *why* it wasn't — was the parser mangling the
+> document, was the index losing chunks, was the judge itself unreliable? Each addition below
+> eliminates one suspect. Grew from 1 day to 2.
+
+### Step 0 — the contamination rule. Read this before writing a single question.
+
+Write every question from the **source document**, in your own words, and *only then* find
+the chunk that should answer it.
+
+The natural approach — read the chunks, write a question per chunk — reuses the chunk's own
+vocabulary. Retrieval then matches for reasons that have nothing to do with how a real user
+types, and your hit rate is inflated with **no way to see it happening**. Phrase questions
+the way someone actually asks: abbreviated, sloppy, using a synonym instead of the
+document's own term.
+
+Free if obeyed now. Costs a full rewrite of all 18 questions if remembered later.
+
 ### Steps
 
-1. Test corpus: **3-4 Paul Graham essays** (public, unambiguous, well-known). Download the plain text, upload as documents in a fresh test account.
-2. Write **15 Q&A pairs** by hand, in `scripts/eval_qa.json`:
-   - 10 straightforward retrieval questions ("What does X say about Y?") with the ground-truth chunk noted.
-   - 3 multi-hop questions requiring 2+ chunks to answer correctly.
-   - 2 adversarial questions where the answer is *not* in the corpus — correct behavior is "I don't see this in the provided documents."
-3. `scripts/eval.py`:
-   - Loads Q&A pairs.
-   - For each question, runs through the full pipeline (`/chat` endpoint or the underlying service directly).
-   - For each of the 3 models: `gpt-4o-mini`, `claude-3-5-haiku`, `gemini-2.0-flash`.
-   - Metrics:
-     - **Retrieval hit rate**: did the ground-truth chunk appear in top-5?
-     - **Faithfulness** (via RAGAS): does the answer stick to retrieved chunks?
-     - **Answer correctness**: LLM-as-judge — use Claude 3.5 Sonnet or GPT-4o (something bigger than the models being judged), score 1-5 with a clear rubric, take mean.
-   - Output: `eval_results.md` — markdown table with per-model rollups + per-question breakdown.
-4. Write a **failure mode analysis** section: which questions failed, why, what would fix them (better chunking? re-ranking? query expansion?). This is what interviewers actually want to read.
+1. **Test corpus** — a fresh test account, containing:
+   - **3–4 Paul Graham essays** (public, unambiguous, well-known). Plain text.
+   - **One technical document with both figures and identifiers** — version numbers, proper
+     nouns, table labels, API names. It does double duty: it is the only source for the
+     figure-only question (Day 6b put images in the index; nothing has ever tested that they
+     come *out*), and the only thing in the corpus hybrid search can beat dense retrieval on.
+     PG essays are pure prose — BM25 has nothing to win with there.
+2. **18 Q&A pairs** by hand in `scripts/eval_qa.json`:
+   - 10 straightforward retrieval questions, ground-truth chunk noted.
+   - 3 multi-hop questions needing 2+ chunks.
+   - 2 adversarial questions whose answer is *not* in the corpus — correct behaviour is
+     "I don't see this in the provided documents."
+   - **2–3 multi-turn questions** — follow-ups that only make sense after a previous turn.
+     These exist to measure the Day 9 rewriting work. Expect them to fail before it.
+   - **1 figure-only question**, answerable solely from an image in the technical document.
+3. `scripts/eval.py` — loads the pairs, runs the pipeline by importing `services/rag.py`
+   directly (it is plain functions with no FastAPI in it, precisely so this is possible),
+   across all three models from Day 7. Output: `eval_results.md`.
+
+### The 11 checks
+
+**Upstream — is the data even good?** *Run these first. Every metric below inherits their
+failures, and no amount of retrieval tuning can repair a chunk that was garbage when written.*
+
+| # | Check | What it rules out |
+|---|---|---|
+| 1 | **Extraction fidelity** — read parser output *by eye* for a 2-column PDF, a table-heavy report, a scanned PDF, and a DOCX with tables. Score clean / degraded / unusable. | `_parse_pdf` uses `page.get_text()`, which reads a two-column layout *across* columns; `_parse_docx` skips tables entirely (its own comment says so). Either produces plausible-looking nonsense. |
+| 2 | **ANN recall vs exact search** — same questions against HNSW and against a forced sequential scan; compare the result sets. | `chunks_embedding_hnsw_idx` is **approximate**. It returns a fast guess tuned by `hnsw.ef_search` (default 40), not the true top-5. If it's losing chunks, every metric below silently inherits the loss. |
+
+**Retrieval**
+
+| # | Check | What it asks |
+|---|---|---|
+| 3 | **Hit rate / Recall@k** | Was the ground-truth chunk in the top k? (Same number as recall when one chunk is correct; genuinely different for the multi-hop questions.) |
+| 4 | **MRR** | *Where* did it land? Rank 1 scores 1.0, rank 5 scores 0.2. A chunk at rank 5 is fighting four others for the model's attention. |
+| 5 | **Baseline / ablation rows** — no-RAG, k=3, k=5, k=10 | **"80%" means nothing without a comparison row.** This is the difference between a number and an argument. Nearly free: it's a loop you're already running. |
+| 6 | **Per-question-type breakdown** | *"Straightforward 90%, multi-hop 33%"* is a finding. A blended 78% hides it. A `groupby`. |
+
+> **Not measured: precision@k.** With one correct chunk per question, perfect retrieval
+> still scores 1/5 = 20%. The metric is structurally capped and says nothing. Worth being
+> able to explain why it was left out.
+
+**Generation**
+
+| # | Check | What it asks |
+|---|---|---|
+| 7 | **Faithfulness + answer relevance** (RAGAS) | Does the answer stick to the retrieved chunks, and does it answer *the question asked*? Relevance is free once faithfulness is wired. |
+| 8 | **Answer correctness** — LLM-as-judge, a model bigger than those being judged, 1–5 rubric | Right vs ground truth |
+| 9 | **Citation accuracy** — does each cited chunk *actually support* the sentence attached to it? | **Nothing else on this list catches it.** A right answer with the wrong chunk attached passes both faithfulness and correctness, while shipping a lie to a user — against a product whose entire promise is "answers cite their sources." |
+| 10 | **Judge validation** — hand-label 10 judged answers, report agreement | Check 8 is one model's opinion reported as fact. If the judge agrees with me 9/10, the metric means something. If it's 6/10, I've been reporting noise. |
+
+**System**
+
+| # | Check | What it asks |
+|---|---|---|
+| 11 | **Cost + latency per model** — TTFT, total, $ per query | Three extra columns on a loop already running, and the payoff for the whole multi-model design — which otherwise measures one of its three axes and throws the other two away. |
+
+**Plus: automated cross-user isolation test.** Two Clerk accounts; assert user B's retrieval
+returns zero of user A's chunks. ~15 lines. Since Day 1 this project has claimed RLS *is*
+the security boundary — this is the difference between claiming it and proving it.
+
+4. **Failure mode analysis** — which questions failed, why, what would fix them. This is
+   what interviewers actually read. Day 11.5 is the follow-through.
 
 ### Done when
 
-- [ ] `eval_results.md` exists with per-model metrics and per-question detail.
-- [ ] I can explain out loud, in an interview: "Retrieval hit rate was X%, we missed on questions like Y because of Z, the fix would be W."
+- [ ] `eval_results.md` exists: per-model rollups, per-question detail, per-type breakdown.
+- [ ] Every number has a comparison row next to it.
+- [ ] Extraction fidelity is written down *before* any retrieval number is trusted.
+- [ ] I can say out loud: "Hit rate was X%, we missed on questions like Y because of Z, and I know it's Z and not W because of check N."
 
 **Do not skip. Do not compress. If Day 10 slips, cut error handling polish before you cut this.**
+
+---
+
+## Day 11.5 — Improvements, measured
+
+**Goal:** Fix what Day 11 found, and have the numbers to prove each fix worked.
+
+> **Everything here must come after Day 11.** Built first, each of these is an
+> unfalsifiable bullet point — *"I added re-ranking"* proves nothing. Built second, each is
+> a before/after with a number on it. That difference is the entire value.
+
+| Item | What | Why | Cost |
+|---|---|---|---|
+| **Re-ranking** | Retrieve k=20 by vector, send those 20 + the question to Cohere's rerank endpoint, keep the top 5 | The standard production fix for naive vector RAG, and the `COHERE_API_KEY` is already in `.env`. Verify the current rerank model ID before use. | 1 afternoon |
+| **Hybrid search** | Postgres `tsvector` + `websearch_to_tsquery`, fused with vector results via Reciprocal Rank Fusion (~5 lines of SQL) | Dense retrieval degrades on **exact-match tokens** — identifiers, surnames, error codes. Postgres does full-text natively, so this is one migration and zero new dependencies. Only measurable because step 1 put a technical document in the corpus. | half day |
+| **Prompt injection test + defense** | Upload a PDF containing an instruction aimed at the model. Show whether it obeys. Defend (delimiters, system prompt naming retrieved text as untrusted **data**), re-measure. | This app's input is *arbitrary files uploaded by strangers* — the textbook injection surface. Even "it partially works, here's the residual risk" is a more honest security answer than most candidates give. | 2h |
+| **Abstention threshold** | Below a similarity cutoff, skip the LLM entirely and return "I don't see this in your documents" | A product improvement, not just a metric: fewer confident wrong answers, and it saves money by not calling the model at all. **Day 11's data sets the number** — that's why it isn't a guess made on Day 7. | 30 min |
+
+### Done when
+
+- [ ] Each item has a before/after row in `eval_results.md`.
+- [ ] Re-ranking's delta is stated with its latency and cost, not just its accuracy.
+- [ ] The injection test's outcome is written down honestly, including what still gets through.
 
 ---
 
@@ -401,9 +531,25 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
      - Why LiteLLM as the abstraction point
      - How RLS enforces isolation (single security boundary)
    - **Public LangSmith trace link** (from Day 10)
-   - **Eval results table + failure mode analysis** (from Day 11)
+   - **Eval results table + failure mode analysis** (Day 11), **with the Day 11.5
+     before/after rows** — the fixes are worth more than the failures
    - **Local dev setup** — clone, env setup, migrations, running both apps
-   - **What's next** — v1.5 ideas (Ollama, semantic chunking, hybrid retrieval, re-ranking)
+   - **What's next** — things deliberately *not* built, each with the one-line reason.
+     Naming your own gaps reads as confidence; a list of unqualified "future work" doesn't.
+     - **Position bias / chunk ordering** — the lost-in-the-middle effect is documented at
+       long contexts. We send ~4K tokens into a 400K window, so it would measure as noise.
+     - **Content-hash dedup** — uploading the same file twice mints a new `document_id` and
+       a second full set of chunks (the unique index is on `(document_id, chunk_index)`, so
+       it stops nothing across documents). Retrieval can then return the same passage five
+       times and call it five sources. A feature, not an eval.
+     - **CI regression eval on every PR** — real money per push, and no team to protect.
+     - **Chunk-size ablation (400/800/1200)** — every variant re-embeds the whole corpus,
+       paid per token.
+     - **HyDE / query expansion** — re-ranking delivers more for less.
+     - Ollama, semantic chunking, semantic caching.
+
+     *(Hybrid retrieval and re-ranking moved **out** of this list — they're built and
+     measured on Day 11.5.)*
 2. **Demo video** — 2-3 minutes, narrated screen recording:
    - Sign up
    - Upload a doc
@@ -427,7 +573,10 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 ## Reality check
 
-- **This is 12 days of focused work.** Full-time: 2-2.5 weeks calendar. Evenings around job search: 3-4 weeks.
+- **This is ~15 days of focused work.** Grew from 12 on 2026-08-07: Day 11 became two days
+  (3 metrics → 11) and Day 11.5 is new. The added days are all evaluation and measured
+  improvement, which is the part of this project worth the most per hour spent on it.
+  Full-time: ~3 weeks calendar. Evenings around job search: 4-5 weeks.
 - **Something will break.** Most likely candidates: Clerk JWT → Supabase RLS handshake (Day 3), Railway Python cold-start (Day 3 evening), SSE streaming through Vercel/Railway (Day 7 or 8), Supabase Storage RLS policy syntax (Day 5).
 - **Budget for slip.** If a day slips, extend calendar time — do not cut the eval.
 
@@ -438,12 +587,25 @@ Cut in this order, most cuttable first:
 1. Auto-titling conversations (Day 9)
 2. Rename conversation (Day 9)
 3. Delete conversation via UI (Day 9)
-4. Error handling polish (Day 10 second half)
-5. Multi-hop and adversarial questions (Day 11) — drop from 15 to 10 straightforward Q&A pairs
+4. **Hybrid search (Day 11.5)** — first of the new work to go. Half a day, and if the
+   technical document slips out of the corpus it has nothing to win on and returns a null
+   result. Explaining precisely *when* BM25 beats dense retrieval, in the README, buys most
+   of the same credit for free.
+5. Error handling polish (Day 10 second half)
+6. **Prompt injection test (Day 11.5)** — a strong story, but the only item here that
+   improves nothing a user can see.
+7. Multi-hop, adversarial and multi-turn questions (Day 11) — drop from 18 to 10
+   straightforward Q&A pairs. **Last resort:** it guts checks 6 and the Day 9 measurement.
 
 Do **not** cut:
 
 - Eval script existing at all
+- **Extraction fidelity (check 1)** — 2 hours, no code, and every number below it is
+  untrustworthy without it
+- **Baseline / ablation rows (check 5)** — free, and they are what turn a metric into an
+  argument. An eval with no comparison row is a number floating in space.
+- **Re-ranking (Day 11.5)** — the strongest measurable improvement available, and the key
+  is already paid for
 - LangSmith tracing
 - README design-decisions section
 - Demo video
@@ -453,7 +615,7 @@ Do **not** cut:
 ## Definition of done for the whole project
 
 - [ ] Live URL works
-- [ ] Anyone can sign up, paste a key, upload a doc, chat
+- [ ] Anyone can sign up, upload a doc, and chat — no key needed, caps stated honestly
 - [ ] README explains why every major decision was made
 - [ ] Eval results are public and show honest numbers (including failures)
 - [ ] Public LangSmith trace exists
