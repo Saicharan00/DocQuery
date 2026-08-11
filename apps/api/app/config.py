@@ -9,11 +9,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Anchored to this file's own location, not to `.env` as a bare relative path.
 # A relative path resolves against the working directory, so it only worked when
 # uvicorn happened to be launched from the repo root and silently reported every
-# field as "missing" from anywhere else. Railway hid this completely: it injects
-# real environment variables, so no file is ever read there.
+# field as "missing" from anywhere else.
 #
-# config.py -> app -> api -> apps -> <repo root>
-ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+# Found by searching upward rather than by counting levels. `parents[3]` was
+# correct locally (config.py -> app -> api -> apps -> repo root) and crashed on
+# Railway with `IndexError: 3`: the service's root is `apps/api`, so the file
+# deploys to `/app/app/config.py` and there is no fourth parent above it. The
+# app never finished importing, so it never answered a health check.
+#
+# `None` when nothing is found, which is the right answer on Railway — it injects
+# real environment variables and there is no file to read. pydantic-settings
+# accepts that and reads the environment alone.
+ENV_FILE = next(
+    (
+        parent / ".env"
+        for parent in Path(__file__).resolve().parents
+        if (parent / ".env").is_file()
+    ),
+    None,
+)
+
+# In plain English: walk up the folders above this file one at a time, and stop at
+# the first one that actually contains a `.env`. `next(..., None)` takes that first
+# match, or hands back None if the walk finishes without finding one. Searching
+# for the file cannot go wrong when the folder layout differs between machines,
+# where counting levels breaks the moment anything moves.
 
 
 class Settings(BaseSettings):
