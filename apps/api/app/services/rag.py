@@ -31,15 +31,21 @@ logger = logging.getLogger(__name__)
 # image chunks, so a text-only model would receive the label "[Image from page
 # 4]" and confidently answer from nothing.
 #
-# ⚠️ `gemini-2.5-flash-lite` shuts down 16 Oct 2026. The successor is
-# `gemini/gemini-3.5-flash-lite` at 3x input / 6x output; swapping this line
-# before that date is the whole migration.
+# The default was `gemini-2.5-flash-lite` until 2026-08-11, when the first real
+# call returned 404: "no longer available to new users". Its published shutdown
+# date is still months away, and Google's own catalogue endpoint still lists it —
+# access had simply been closed to keys minted after some earlier cutoff. Being
+# listed is not being callable, and only an actual request tells the difference.
+#
+# `gemini-3.5-flash-lite` is $0.30/$2.50 against the old $0.10/$0.40. Roughly
+# $0.002 a question at k=5, which is the price of a default that will still
+# answer next month.
 SUPPORTED_MODELS = {
-    "gemini/gemini-2.5-flash-lite": "gemini_api_key",
+    "gemini/gemini-3.5-flash-lite": "gemini_api_key",
     "gpt-5.4-nano": "openai_api_key",
 }
 
-DEFAULT_MODEL = "gemini/gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini/gemini-3.5-flash-lite"
 
 # How many chunks a question retrieves. Day 11 sweeps 3/5/10 by passing `k`
 # directly, which is also why this is not a field on the API request: a caller

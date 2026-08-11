@@ -269,7 +269,7 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
    | Model | $/1M in – out | Notes |
    |---|---|---|
-   | `gemini/gemini-2.5-flash-lite` | 0.10 / 0.40 | **default** — I pay per question |
+   | `gemini/gemini-3.5-flash-lite` | 0.30 / 2.50 | **default** — I pay per question |
    | `gpt-5.4-nano` | 0.20 / 1.25 | |
 
    One per provider, so the LiteLLM abstraction is actually exercised rather than claimed.
@@ -280,9 +280,17 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    Day 6b's image chunks are sent as image parts, so a text-only model (DeepSeek, cheaper
    than OpenAI but blind) cannot answer the figure-only eval question at all.
 
-   ⚠️ **`gemini-2.5-flash-lite` shuts down 16 Oct 2026.** Its successor
-   `gemini-3.5-flash-lite` is $0.30 / $2.50 — 3× input, 6× output. The swap is one line in
-   `SUPPORTED_MODELS`; do it before that date or the default model 404s.
+   ⚠️ **`gemini-2.5-flash-lite` was the default until 2026-08-11, when the first real call
+   to it returned 404 — "no longer available to new users".** Its published shutdown date
+   (16 Oct 2026) was still months away and Google's catalogue endpoint still listed it;
+   access had simply been closed to API keys created after some earlier cutoff. The
+   replacement is `gemini-3.5-flash-lite` at $0.30 / $2.50 — 3× input, 6× output on the
+   old price, about $0.002 per question at k=5.
+
+   **The lesson is worth more than the swap:** a model being listed in a provider's
+   catalogue is not the same as that model being callable with your key. Only an actual
+   request distinguishes them, which is why the build tests each provider with a
+   throwaway call before wiring anything to it.
 
    The model list is an **allowlist enforced in the request schema**. Without it a caller
    names any model they like and spends my money on it.
