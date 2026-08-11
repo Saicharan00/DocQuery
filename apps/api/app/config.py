@@ -47,10 +47,29 @@ class Settings(BaseSettings):
     # failing halfway through somebody's first upload.
     cohere_api_key: str
 
+    # Chat models, via LiteLLM. Unlike cohere_api_key these are optional: with one
+    # provider configured the app still boots and only requests naming the other
+    # one fail, which is what makes it possible to build and test against Gemini
+    # alone. The cost is that a typo in the env var name surfaces as a runtime
+    # "not configured" error instead of a startup crash.
+    #
+    # These get passed to LiteLLM explicitly as api_key=, never left to its
+    # implicit environment lookup: pydantic-settings reads .env into this object
+    # but never exports to os.environ, so an implicit lookup would find the key on
+    # Railway (real env vars) and miss it locally. A bug that only appears on one
+    # machine is the worst kind.
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+
     # Spend guards. Every embedding is billed to my own Cohere key now that BYOK
     # is gone, so these protect a card, not a free quota.
     max_documents_per_day: int = 15
     global_daily_document_limit: int = 200
+
+    # The same guard for chat. Counted per user message, since one user message is
+    # one LLM call — the assistant row is its result, not a second charge.
+    max_messages_per_day: int = 50
+    global_daily_message_limit: int = 500
 
     # Comma-separated list of browser origins allowed to call this API.
     # Day 4 adds the Vercel URL here — no code change needed, just the env var.
