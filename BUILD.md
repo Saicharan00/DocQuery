@@ -264,16 +264,21 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
    - Stream tokens via SSE (`text/event-stream`).
    - After stream ends: save the user message + assistant message to `messages` table, with retrieved chunk metadata as `sources` JSON.
 3. Supported models. The two dead ones (`claude-3-5-haiku-20241022`, retired 2026-02-19;
-   `gemini/gemini-2.0-flash`, shut down 2026-06-01) are replaced below. **All three
-   verified against provider docs 2026-08-07** — pricing current, all vision-capable:
+   `gemini/gemini-2.0-flash`, shut down 2026-06-01) are replaced below. **Both verified
+   against provider docs 2026-08-07** — pricing current, both vision-capable:
 
    | Model | $/1M in – out | Notes |
    |---|---|---|
    | `gemini/gemini-2.5-flash-lite` | 0.10 / 0.40 | **default** — I pay per question |
    | `gpt-5.4-nano` | 0.20 / 1.25 | |
-   | `claude-haiku-4-5-20251001` | 1.00 / 5.00 | ~10× the default |
 
    One per provider, so the LiteLLM abstraction is actually exercised rather than claimed.
+
+   **Anthropic was cut on 2026-08-10.** `claude-haiku-4-5` is $1.00 / $5.00 — ~10× the
+   default on a workload where every answer is billed to me, and a third provider proves
+   nothing the second one doesn't. Vision-capable is a hard requirement, not a preference:
+   Day 6b's image chunks are sent as image parts, so a text-only model (DeepSeek, cheaper
+   than OpenAI but blind) cannot answer the figure-only eval question at all.
 
    ⚠️ **`gemini-2.5-flash-lite` shuts down 16 Oct 2026.** Its successor
    `gemini-3.5-flash-lite` is $0.30 / $2.50 — 3× input, 6× output. The swap is one line in
@@ -281,7 +286,9 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
    The model list is an **allowlist enforced in the request schema**. Without it a caller
    names any model they like and spends my money on it.
-4. Add `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` to `.env.example` + Railway.
+4. Add `GEMINI_API_KEY` and `OPENAI_API_KEY` to `.env.example` + Railway. Both are
+   **optional** in `Settings`, unlike `cohere_api_key` — the API must still boot when only
+   one provider is configured, and name the missing one per request instead.
 
 ### Done when
 
@@ -523,7 +530,7 @@ the security boundary — this is the difference between claiming it and proving
    - Title + one-line pitch
    - Screenshot or GIF at the very top
    - **Live demo link** — no key needed, it's a rate-limited demo on my keys ("sign in, upload a doc, chat"). State the daily caps honestly.
-   - **Architecture diagram** — Mermaid, showing: Browser → Vercel (Next.js) → Railway (FastAPI) → Supabase (Postgres + pgvector + Storage) + LangSmith side-branch + LiteLLM → OpenAI/Anthropic/Gemini
+   - **Architecture diagram** — Mermaid, showing: Browser → Vercel (Next.js) → Railway (FastAPI) → Supabase (Postgres + pgvector + Storage) + LangSmith side-branch + LiteLLM → Gemini/OpenAI
    - **Tech stack** with one-line "why" per choice
    - **Design decisions** — 3-4 paragraphs on:
      - Why pgvector instead of a dedicated vector DB
