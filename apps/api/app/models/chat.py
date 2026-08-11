@@ -25,7 +25,7 @@ from app.services import rag
 # FastAPI to reject an unknown model before the handler runs — and being
 # rejected by validation is the point. Without this a caller names any model
 # they like, LiteLLM cheerfully routes to it, and the bill is mine.
-ModelName = Literal["gemini/gemini-2.5-flash-lite", "gpt-5.4-nano"]
+ModelName = Literal["gemini/gemini-3.5-flash-lite", "gpt-5.4-nano"]
 
 # Two lists that must agree, so they are compared once at import. A mismatch
 # stops the app at startup instead of surfacing as a confusing 503 on somebody's
