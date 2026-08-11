@@ -300,10 +300,30 @@ Each day has a **Goal**, **Steps**, and a **Done when** checklist. Don't skip th
 
 ### Done when
 
-- [ ] `curl -N` on `/chat` streams tokens live.
-- [ ] Answer references content from an uploaded doc.
-- [ ] `sources` in the saved message contains `{document_name, chunk_index, content_preview}` for each retrieved chunk.
+- [x] `curl -N` on `/chat` streams tokens live. **Verified on Railway 2026-08-11**, which is
+      the only place it means anything: `sources` landed at 1.72s and the first token at
+      3.66s, a 1.94s gap a buffering proxy cannot produce. `X-Accel-Buffering: no` came back
+      in the response headers.
+- [x] Answer references content from an uploaded doc — cited `[1]` and `[3]` across
+      ionospheric, tropospheric, multipath and DOP effects from a 77-page GPS report.
+- [x] `sources` in the saved message contains `{document_name, chunk_index, content_preview}`
+      for each retrieved chunk — all nine fields present, read back out of Postgres.
 - [ ] Trying to chat over another user's docs is impossible (RLS blocks retrieval).
+      **Still unproven** — needs a second Clerk account. `match_chunks` is `security invoker`
+      so the policies from `001` should apply inside it, but "should" is not a test. Day 11's
+      automated cross-user isolation test is where this gets settled.
+
+**Also proven on the way through:** images retrieved *and read* (the model described a
+diagram whose stored text is only `[Image from page 74]`); both providers answering through
+the real endpoint; continuing an existing conversation; the spend cap returning `429` before
+any billable call.
+
+**Measured, for later days:** time-to-first-word was 3.66s, of which **1.72s is our own
+pipeline** before the model is called — spend check, Cohere embedding, vector search, image
+downloads, conversation insert, each a separate round trip. The half we control is as large
+as the model's. Day 10's tracing is what breaks it down. Retrieval similarities came back at
+0.18–0.25 against 0.68 for a near-verbatim quote on Day 6, with four of the top five chunks
+being images — direct input for Day 11.5's abstention threshold.
 
 ---
 
