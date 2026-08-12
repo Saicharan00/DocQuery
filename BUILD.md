@@ -346,10 +346,16 @@ being images — direct input for Day 11.5's abstention threshold.
 
 ### Done when
 
-- [ ] Hold a real conversation on the live site.
-- [ ] Switch models mid-conversation — next message uses the new model.
-- [ ] Expand citations, see the chunks.
-- [ ] Kill the network mid-stream → get a clean error, not a hung UI.
+- [x] Hold a real conversation on the live site. **Verified on Vercel 2026-08-11.**
+- [x] Switch models mid-conversation — next message uses the new model.
+- [x] Expand citations, see the chunks — numbering matches the `[n]` markers in the answer.
+- [x] Kill the network mid-stream → get a clean error, not a hung UI. **Failed on first
+      attempt and was fixed.** A vanished network never closes the socket, so `reader.read()`
+      stayed pending forever and the page hung on "Thinking…". Each read now races a 20s
+      idle timer that resets on every chunk. Verified live by switching wifi off mid-answer.
+
+Route shipped as `/dashboard/chat`, not `/dashboard/chat/[id]` — an id in the URL buys
+nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file into `[id]/`.
 
 ---
 
