@@ -57,16 +57,22 @@ export interface Source {
 }
 
 /**
- * The five things `/chat` can send down the stream.
+ * The six things `/chat` can send down the stream.
  *
  * `conversation` arrives first, then `sources`, then many `token`s, then either
  * `done` or `error`. Nothing else is possible, which is what makes the switch
  * in the chat page exhaustive.
+ *
+ * `title` is the exception to that ordering, and it is conditional: it arrives
+ * just before `done`, and only for a conversation that was created by this very
+ * request. `_retitle` in chat.py names it once the first answer is finished, and
+ * stays silent if the naming call failed.
  */
 export type ChatEvent =
   | { event: "conversation"; data: { id: string } }
   | { event: "sources"; data: { sources: Source[] } }
   | { event: "token"; data: { text: string } }
+  | { event: "title"; data: { title: string } }
   | { event: "error"; data: { detail: string } }
   | { event: "done"; data: Record<string, never> };
 
@@ -81,6 +87,37 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+}
+
+// ---------------------------------------------------------------------------
+// Conversation history
+// ---------------------------------------------------------------------------
+
+/** One row in the sidebar. Mirrors `ConversationOut`. */
+export interface Conversation {
+  id: string;
+  /** Null is possible in the schema, so the UI falls back to "New conversation". */
+  title: string | null;
+  created_at: string;
+  /** The sort key — last activity, not creation. ISO 8601. */
+  updated_at: string;
+}
+
+/**
+ * One stored message, as `GET /conversations/{id}/messages` returns it.
+ * Mirrors `MessageOut`.
+ *
+ * Close to `ChatMessage` but not the same thing, and deliberately kept apart:
+ * this is what the database holds, `ChatMessage` is what a bubble needs. A
+ * streaming answer is a `ChatMessage` that has no row yet.
+ */
+export interface MessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  model: string | null;
+  sources: Source[] | null;
+  created_at: string;
 }
 
 /**
