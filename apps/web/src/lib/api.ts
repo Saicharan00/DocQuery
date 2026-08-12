@@ -138,8 +138,49 @@ export function useChatStream() {
       // the connection died mid-answer.
       let signedOff = false;
 
+      // Losing the network mid-answer does not close the socket. Nothing is left
+      // to send the close notification, so `reader.read()` never settles — not
+      // resolved, not rejected, just pending — and the page would sit on
+      // "Thinking…" for as long as the OS takes to give up on the connection.
+      // Silence is the only symptom available, so silence is what we watch: a
+      // live stream is never quiet this long, because the server sends tokens
+      // continuously. Deliberately generous — a slow model must not trip it.
+      const IDLE_MS = 20_000;
+
+      /** One read, but never an unbounded wait. */
+      const readOrStall = async () => {
+        let idle: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => {
+              idle = setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      "The connection stalled before the answer finished. Please try again.",
+                    ),
+                  ),
+                IDLE_MS,
+              );
+            }),
+          ]);
+        } finally {
+          // Whichever side won, the timer must go. Left running it would fire
+          // later and reject a promise nobody is waiting on any more.
+          clearTimeout(idle);
+        }
+      };
+
+      // In plain English: start a read and a 20-second alarm at the same time,
+      // and take whichever finishes first. Bytes arriving cancel the alarm and
+      // the next read sets a fresh one, so the countdown restarts on every
+      // chunk. Only an actual 20-second gap lets the alarm win, and when it does
+      // it throws — which is what turns an invisible dead connection into a
+      // visible error message.
+
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readOrStall();
         if (done) break;
 
         // `{ stream: true }` is not optional here. A multi-byte character — é,
