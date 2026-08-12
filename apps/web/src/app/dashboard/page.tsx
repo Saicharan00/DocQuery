@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useUser, UserButton } from "@clerk/nextjs";
+import { MessageSquare } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import { DocumentList } from "@/components/document-list";
 import { UploadZone } from "@/components/upload-zone";
 import { AuthNotReadyError, useApi } from "@/lib/api";
@@ -149,7 +153,18 @@ export default function DashboardPage() {
     <main className="p-8">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <UserButton />
+
+        <div className="flex items-center gap-3">
+          {/* The only way to reach the chat page until Day 9 builds the
+              sidebar that would normally hold this. */}
+          <Button asChild size="sm">
+            <Link href="/dashboard/chat">
+              <MessageSquare />
+              Chat
+            </Link>
+          </Button>
+          <UserButton />
+        </div>
       </div>
 
       <p>Email: {user?.primaryEmailAddress?.emailAddress}</p>
