@@ -363,6 +363,12 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 **Goal:** Conversations persist. Users can resume old chats.
 
+> **Split into 9a and 9b on 2026-08-12**, the same way Days 3 and 6 were.
+> **9a — conversations persist** (steps 1–4): shipped and verified 2026-08-12.
+> **9b — chat memory** (step 5): history in the prompt, and query rewriting before
+> embedding. Still outstanding. Deferred not for scope but because Day 11 is what
+> measures whether either actually helped, and neither is worth guessing at first.
+
 ### Steps
 
 1. Sidebar component in `/dashboard/*` layout:
@@ -390,11 +396,39 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 ### Done when
 
-- [ ] Close browser → reopen → click an old conversation → see full history → keep chatting.
-- [ ] Rename a conversation.
-- [ ] Delete a conversation.
-- [ ] First user message → conversation title auto-updates within a few seconds.
+- [x] Close browser → reopen → click an old conversation → see full history → keep chatting.
+      **Verified 2026-08-12** by reload rather than a full browser restart — the same proof,
+      since nothing client-side survives either. Citations came back with the answers, so
+      the `sources` JSON round-trips through Postgres intact.
+- [x] Rename a conversation. **Verified 2026-08-12.**
+- [x] Delete a conversation. **Verified 2026-08-12**, including deleting the one currently
+      open, which redirects to a new chat instead of leaving a dead page.
+- [x] First user message → conversation title auto-updates within a few seconds.
+      **Verified 2026-08-12** — "can you tell me what this document says about the things
+      tha…" became "Positioning Accuracy Factors".
 - [ ] A follow-up ("what about the second one?") retrieves the right chunks, not noise.
+      **Day 9b.** Confirmed still broken on 2026-08-12: a follow-up of "give count" after a
+      list of names was embedded literally, retrieved noise, and the model correctly refused
+      to answer rather than inventing a number. That refusal is `SYSTEM_PROMPT` working; the
+      retrieval is what 9b fixes.
+
+### What was learned
+
+- **`PATCH` was the hinge, and it passed.** The first write to an *existing* row anywhere in
+  this app. PostgREST answers an RLS-rejected write with an empty result set rather than an
+  error, so a broken rename would have returned `200 OK` and changed nothing — the status
+  code proves nothing, and only reading the title back out proves the write landed. Both
+  `PATCH` and `DELETE` therefore look the row up first and write second.
+- **The `204` from `DELETE` is what proves the cascade.** `messages.conversation_id` is a
+  foreign key, so Postgres refuses to delete a parent row that still has children. A delete
+  that succeeds against a conversation with eight messages means those eight went with it.
+- **`window.prompt()` is not universally available.** It threw `prompt() is not supported`
+  in the browser, before any request could be sent, while `confirm()` in the same component
+  worked. Rename is an inline text input instead — no dialog, nothing for a browser to
+  block, and better UI regardless.
+- **Deviation from step 1 above, chosen deliberately:** the sidebar lives in
+  `apps/web/src/app/dashboard/chat/layout.tsx`, not the whole `/dashboard/*` layout, so the
+  documents page stays a full-width upload screen.
 
 ---
 

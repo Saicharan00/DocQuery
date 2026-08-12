@@ -40,9 +40,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# What a new conversation is called until Day 9 replaces it with a real title.
-# The user's own first words, cut short — a placeholder that is still recognisable
-# in a sidebar, at the cost of nothing.
+# What a new conversation is called until `_retitle` names it properly at the end
+# of the first answer. The user's own first words, cut short. Still worth writing
+# even though it usually lives for seconds: it costs nothing, it is what the row
+# is called while the answer streams, and it is what the conversation keeps
+# forever if the titling call fails.
 TITLE_CHARS = 60
 
 
@@ -112,13 +114,20 @@ def _enforce_daily_limit(supabase) -> None:
     # naming them anywhere.
 
 
-def _resolve_conversation(supabase, user_id: str, conversation_id: UUID | None, message: str) -> UUID:
-    """Return the conversation this message belongs to, creating one if needed.
+def _resolve_conversation(
+    supabase, user_id: str, conversation_id: UUID | None, message: str
+) -> tuple[UUID, bool]:
+    """Return the conversation this message belongs to, and whether it is new.
 
     Done before streaming so a bad id is a clean 404 rather than an error event
     mid-answer. Verifying an existing id is not redundant with RLS — RLS would
     reject the message insert anyway, but that happens *after* the answer has
     been generated and paid for.
+
+    The second half of the return value exists for auto-titling. This function is
+    the only place that knows whether a row was inserted or looked up, and
+    without it the caller would have to re-derive the answer or pay to re-title
+    a conversation on every message in it.
     """
     if conversation_id is None:
         new_id = uuid4()
@@ -147,7 +156,7 @@ def _resolve_conversation(supabase, user_id: str, conversation_id: UUID | None, 
                 detail="Could not start the conversation. Please try again.",
             )
 
-        return new_id
+        return new_id, True
 
     try:
         found = (
@@ -172,7 +181,7 @@ def _resolve_conversation(supabase, user_id: str, conversation_id: UUID | None, 
             detail="Conversation not found.",
         )
 
-    return conversation_id
+    return conversation_id, False
 
 
 def _save_exchange(
@@ -222,6 +231,40 @@ def _save_exchange(
         ).eq("id", str(conversation_id)).execute()
     except Exception:
         logger.exception("Could not save the exchange in conversation %s", conversation_id)
+
+
+def _retitle(supabase, conversation_id: UUID, question: str) -> str | None:
+    """Replace a new conversation's placeholder title with a written one.
+
+    Returns the new title, or `None` if anything at all went wrong — and the
+    caller is expected to shrug at `None`. By the time this runs the answer is
+    already on the user's screen and already saved; failing to name it well is
+    not a reason to show an error underneath text that plainly worked. The
+    placeholder from `_resolve_conversation` stays, which is why there is
+    something to fall back to.
+
+    Same swallow-and-log bargain `_save_exchange` makes, for the same reason.
+    """
+    try:
+        title = rag.generate_title(question)
+    except Exception:
+        logger.exception("Could not generate a title for conversation %s", conversation_id)
+        return None
+
+    try:
+        supabase.table("conversations").update({"title": title}).eq(
+            "id", str(conversation_id)
+        ).execute()
+    except Exception:
+        logger.exception("Could not save the title for conversation %s", conversation_id)
+        return None
+
+    return title
+
+    # `updated_at` is left alone deliberately, the same as a manual rename in
+    # `conversations.py`. It means "when was this last talked in" and the sidebar
+    # sorts by it; `_save_exchange` has already moved it to now, and touching it
+    # again here would be a second write saying nothing new.
 
 
 def _event(name: str, payload: dict) -> str:
@@ -292,7 +335,7 @@ def chat(
     messages = rag.build_messages(request.message, chunks, images)
     sources = rag.to_sources(chunks)
 
-    conversation_id = _resolve_conversation(
+    conversation_id, is_new = _resolve_conversation(
         supabase, user_id, request.conversation_id, request.message
     )
 
@@ -330,6 +373,12 @@ def chat(
         _save_exchange(
             supabase, user_id, conversation_id, request.message, full, request.model, sources
         )
+
+        if is_new:
+            title = _retitle(supabase, conversation_id, request.message)
+            if title:
+                yield _event("title", {"title": title})
+
         yield _event("done", {})
 
         # In plain English, the block above: collect every piece of text as it
