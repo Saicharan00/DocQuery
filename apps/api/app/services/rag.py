@@ -60,6 +60,22 @@ MAX_ANSWER_TOKENS = 1000
 # `messages.sources` JSON that Day 8 renders on every message.
 PREVIEW_CHARS = 300
 
+# A title is six words. Twenty tokens is roughly triple that, which is slack for
+# a model that opens with "Sure, here you go" rather than room to write an essay.
+TITLE_TOKENS = 20
+
+# The bound `ConversationUpdate` puts on a human rename, applied to the model's
+# output for the same reason.
+TITLE_MAX_CHARS = 200
+
+TITLE_PROMPT = """Write a title of at most 4 words for the question below.
+
+Rules:
+- Reply with the title and nothing else. No quotes, no preamble, no full stop.
+- Name the subject, not the act of asking: "Ionospheric delay correction", never
+  "Question about the document".
+"""
+
 SYSTEM_PROMPT = """You answer questions using only the numbered sources below.
 
 Rules:
@@ -353,6 +369,50 @@ def stream_answer(model: str, messages: list[dict]):
     # The two guards skip the pieces that carry no words. A stream opens with a
     # chunk that only says who is speaking and closes with one that only says why
     # it stopped; both are normal and neither should reach the screen.
+
+
+def generate_title(question: str) -> str:
+    """A few words naming what a conversation is about.
+
+    Always on `DEFAULT_MODEL`, never the model the caller chose to answer with.
+    A title is a label in a sidebar; there is no reason to bill the expensive
+    model for one, and no reason for the same question to produce a different
+    label depending on which provider answered it.
+
+    Not streamed — there is nobody watching six words arrive one at a time.
+
+    Raises rather than returning a fallback. The only caller already has a
+    perfectly good placeholder (the truncated first message) and is the right
+    place to decide that keeping it is fine; inventing a second-best title down
+    here would hide the failure from the log.
+    """
+    api_key = api_key_for(DEFAULT_MODEL)
+
+    response = litellm.completion(
+        model=DEFAULT_MODEL,
+        messages=[
+            {"role": "system", "content": TITLE_PROMPT},
+            {"role": "user", "content": question},
+        ],
+        api_key=api_key,
+        max_tokens=TITLE_TOKENS,
+    )
+
+    title = (response.choices[0].message.content or "").strip().strip('"')
+
+    if not title:
+        raise ValueError("The model returned an empty title.")
+
+    return title[:TITLE_MAX_CHARS]
+
+    # In plain English: ask the cheap model to name the question, then take the
+    # one answer it gives back. `.strip('"')` is there because models like
+    # wrapping titles in quotation marks however plainly you ask them not to.
+    #
+    # The final slice can only fire if a model ignores `max_tokens`, but it is
+    # what guarantees the string fits the same 200-character bound
+    # `ConversationUpdate` enforces on a human rename — model output is untrusted
+    # input to the database exactly like a request body is.
 
 
 # ---------------------------------------------------------------------------
