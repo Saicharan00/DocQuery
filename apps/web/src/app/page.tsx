@@ -6,7 +6,8 @@ export default function Home() {
     <main className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
       <h1 className="text-3xl font-semibold">DocQuery</h1>
       <p className="max-w-md text-zinc-600 dark:text-zinc-400">
-        Chat with your own documents, using your own LLM API key.
+        Upload a document, ask questions about it, and see the exact passages
+        every answer was built from.
       </p>
       <div className="flex gap-4">
         <Button asChild>
