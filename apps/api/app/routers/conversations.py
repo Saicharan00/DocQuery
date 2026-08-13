@@ -110,7 +110,13 @@ def list_messages(
             supabase.table("messages")
             .select("*")
             .eq("conversation_id", str(conversation_id))
+            # `created_at` alone is a genuine tie: both rows of an exchange are
+            # written by one insert, and `now()` is the transaction clock, so the
+            # question and its answer carry byte-identical timestamps. Ascending
+            # time here, so the tie-break runs `desc` — 'user' sorts after
+            # 'assistant', and descending puts it back on top where it belongs.
             .order("created_at")
+            .order("role", desc=True)
             .execute()
         )
     except Exception as exc:

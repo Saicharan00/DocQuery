@@ -366,8 +366,9 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 > **Split into 9a and 9b on 2026-08-12**, the same way Days 3 and 6 were.
 > **9a — conversations persist** (steps 1–4): shipped and verified 2026-08-12.
 > **9b — chat memory** (step 5): history in the prompt, and query rewriting before
-> embedding. Still outstanding. Deferred not for scope but because Day 11 is what
-> measures whether either actually helped, and neither is worth guessing at first.
+> embedding. Shipped and verified 2026-08-12. Deferred to here not for scope but because
+> Day 11 is what measures whether either actually helped, and neither is worth guessing at
+> first.
 
 ### Steps
 
@@ -406,11 +407,15 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 - [x] First user message → conversation title auto-updates within a few seconds.
       **Verified 2026-08-12** — "can you tell me what this document says about the things
       tha…" became "Positioning Accuracy Factors".
-- [ ] A follow-up ("what about the second one?") retrieves the right chunks, not noise.
-      **Day 9b.** Confirmed still broken on 2026-08-12: a follow-up of "give count" after a
-      list of names was embedded literally, retrieved noise, and the model correctly refused
-      to answer rather than inventing a number. That refusal is `SYSTEM_PROMPT` working; the
-      retrieval is what 9b fixes.
+- [x] A follow-up ("what about the second one?") retrieves the right chunks, not noise.
+      **Fixed by Day 9b, verified 2026-08-12.** It was broken earlier the same day: "give
+      count" after a list of names was embedded literally, retrieved noise, and the model
+      correctly refused to answer rather than inventing a number. That refusal was
+      `SYSTEM_PROMPT` working; the retrieval was the defect. After 9b the server logs
+      `Rewrote 'give count' as 'How many factors affect GPS positioning accuracy according
+      to the document?'`, retrieval returns five chunks from consecutive pages 74–78 of the
+      right document (top similarity 0.59), and the answer comes back grounded and cited
+      with the correct count of 6.
 
 ### What was learned
 
@@ -429,6 +434,42 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 - **Deviation from step 1 above, chosen deliberately:** the sidebar lives in
   `apps/web/src/app/dashboard/chat/layout.tsx`, not the whole `/dashboard/*` layout, so the
   documents page stays a full-width upload screen.
+
+#### From 9b
+
+- **`order by created_at` on `messages` was a genuine coin flip, and had been since Day 1.**
+  `created_at` defaults to `now()`, and Postgres' `now()` is the *transaction* timestamp — so
+  the two rows `_save_exchange` writes in one insert carry byte-identical timestamps. Nothing
+  guaranteed which came back first. 9a worked by luck. Both readers now add `role` as a
+  second sort key, and the directions differ *because* the time directions differ:
+  `list_messages` sorts time ascending so `role` is `desc` ('user' above 'assistant');
+  `load_history` sorts time descending to grab the recent end, so `role` is ascending and the
+  whole list is reversed afterwards. It looks like a typo and is commented in both files.
+- **The model answers the ORIGINAL question, never the rewrite.** The rewrite exists to
+  produce a better *vector*: it is embedded, logged, and discarded. It is never saved, never
+  shown, and never sent to the answering model — history in the prompt is what makes the
+  original question legible. Substituting it would answer a question the user never typed.
+- **A heuristic gate on rewriting was proposed and dropped.** "Only rewrite short or
+  pronoun-y questions" would have skipped `"give count"` — no pronoun, and short in a way no
+  length rule catches on purpose. The one case 9b exists to fix would have been the one case
+  the optimisation missed. The rewrite now fires whenever history is non-empty, which costs
+  nothing on a first message because there is no history to find.
+- **The hinge was verified standalone before anything depended on it.** `rewrite_query` is
+  the only piece here that can return `200`-equivalent success and still not fix the bug,
+  because "did this retrieve better chunks?" is a judgement about quality that no status code
+  reports. It was called directly from a throwaway script with the real failing exchange
+  hardcoded, and the strings were read by eye.
+- **That reading caught a real prompt bug and one real limitation.** First pass, the rewriter
+  stapled the conversation's topic onto questions that already stood alone — harmless inside
+  one subject, wrong the moment a user pivots to a different document. Two added rules fixed
+  it, confirmed by a pivot case that now passes through untouched. What did *not* get fixed:
+  ordinals. `"explain the third one"` resolved to the second item in a list. Cheap models
+  count list positions badly and no prompt rule reliably fixes it; retrieval is fuzzy enough
+  to usually survive (neighbouring items sit in neighbouring chunks) and the answering model
+  still sees the original wording. Marked with a `ponytail:` comment in `rag.py`. **Day 11
+  measures whether that ceiling actually bites.**
+- **Backend only — zero frontend files changed.** The browser already sent `conversation_id`,
+  and history lives in Postgres, so the server reads it without being told anything new.
 
 ---
 
