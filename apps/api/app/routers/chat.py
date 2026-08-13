@@ -8,12 +8,17 @@ only be an SSE `error` event that the browser has to be written to understand.
 So everything that can fail cleanly happens before the stream opens, in this
 order, and the order is the design:
 
-    spend cap → embed → retrieve → no chunks? 400 → load images
-              → create/verify conversation → THEN StreamingResponse
+    spend cap → load history → rewrite the question → embed → retrieve
+              → no chunks? 400 → load images → create/verify conversation
+              → THEN StreamingResponse
 
-The cap is first because it is free; embedding is second because it is the first
-thing that costs money. Nothing below the cap runs for a caller who has had
-enough for one day.
+The cap is first because it is free; everything below it costs money, so nothing
+below it runs for a caller who has had enough for one day.
+
+History and the rewrite come *before* the embed and that ordering is the whole of
+Day 9b: a follow-up like "give count" carries no subject, and once it has been
+turned into a vector it is too late for any prompt downstream to recover what it
+meant.
 
 As everywhere else in this app, no query here carries a `WHERE user_id = ...`.
 RLS from `001_init.sql` does that, and `match_chunks` is deliberately
@@ -304,8 +309,41 @@ def chat(
             detail=str(exc),
         ) from exc
 
+    # Day 9b. Deliberately a plain select rather than `_resolve_conversation`,
+    # which stays where it is further down: that function *creates* the row, and
+    # moving it above the embed call would leave an empty conversation in the
+    # sidebar every time embedding failed. A bogus or foreign id costs one
+    # indexed lookup here, returns nothing (RLS), and still gets its clean 404
+    # from `_resolve_conversation` later.
+    history: list[dict] = []
+    if request.conversation_id is not None:
+        try:
+            history = rag.load_history(supabase, request.conversation_id)
+        except Exception:
+            # Degrade to Day 9a: an answer with no memory beats an error page.
+            logger.exception("Could not load history for %s", request.conversation_id)
+
+    search_query = request.message
+    if history:
+        try:
+            search_query = rag.rewrite_query(request.message, history)
+            # Logged because Day 11 has to be able to audit what the retriever
+            # actually saw. The rewrite is otherwise invisible: it is never sent
+            # to the answering model, never saved, and never shown to the user.
+            logger.info("Rewrote %r as %r", request.message, search_query)
+        except Exception:
+            logger.exception("Query rewrite failed; searching the original question")
+
+    # In plain English: if this message belongs to an existing conversation, read
+    # the last few messages of it. If there are any, ask the cheap model to turn
+    # the question into one that makes sense on its own — "give count" becomes
+    # "how many factors affect positioning accuracy?" — and search with that
+    # instead. A first message has no history, so both steps are skipped and cost
+    # nothing. If either step breaks we keep the original question and carry on,
+    # which is exactly how this endpoint behaved yesterday.
+
     try:
-        query_vector = rag.embed_query(request.message)
+        query_vector = rag.embed_query(search_query)
     except Exception as exc:
         logger.exception("Embedding the question failed")
         raise HTTPException(
@@ -332,7 +370,11 @@ def chat(
         )
 
     images = rag.load_images(supabase, chunks)
-    messages = rag.build_messages(request.message, chunks, images)
+    # `request.message`, never `search_query`. The user asked "give count" and
+    # that is the question the model answers; the rewrite existed only to produce
+    # a better vector, and it has already done that. History is in the prompt to
+    # make the original question legible.
+    messages = rag.build_messages(request.message, chunks, images, history)
     sources = rag.to_sources(chunks)
 
     conversation_id, is_new = _resolve_conversation(
