@@ -64,6 +64,21 @@ PREVIEW_CHARS = 300
 # a model that opens with "Sure, here you go" rather than room to write an essay.
 TITLE_TOKENS = 20
 
+# How much of a conversation the model gets to see. Three exchanges is what
+# BUILD.md asks for; "turn" means one question *and* its answer, so this is six
+# database rows.
+HISTORY_TURNS = 3
+
+# Per message, not per history. `MAX_ANSWER_TOKENS = 1000` lets a single answer
+# reach roughly 4000 characters, so three unbounded turns could quietly add
+# thousands of tokens to every follow-up. CLAUDE.md makes spend a design
+# constraint, and a bounded worst case is one slice.
+HISTORY_CHARS = 1000
+
+# A standalone question is one sentence. This is a brake on a model that decides
+# to explain its rewrite rather than a target length.
+REWRITE_TOKENS = 60
+
 # The bound `ConversationUpdate` puts on a human rename, applied to the model's
 # output for the same reason.
 TITLE_MAX_CHARS = 200
@@ -76,12 +91,30 @@ Rules:
   "Question about the document".
 """
 
+REWRITE_PROMPT = """Rewrite the user's latest question so it can be understood on \
+its own, without the conversation.
+
+Rules:
+- Use the conversation to fill in what the question leaves out: pronouns, "it", \
+"the second one", or a subject that is simply missing.
+- If the question already stands on its own, reply with it word for word \
+unchanged. Do not improve it, and do not add the topic of the conversation to a \
+question that did not mention it.
+- The user is allowed to change the subject. Never carry the earlier topic into \
+a question that has moved on from it.
+- Reply with the rewritten question and nothing else. No preamble, no \
+explanation, no quotes.
+- Do not answer the question. Only rewrite it.
+"""
+
 SYSTEM_PROMPT = """You answer questions using only the numbered sources below.
 
 Rules:
 - Ground every claim in the sources. Do not use outside knowledge.
 - Cite the sources you used inline, like [1] or [2][3].
 - Some sources are images. Read them as carefully as the text.
+- Earlier messages in this conversation may cite numbers of their own. Ignore \
+them: [1], [2] and so on always mean the numbered sources in this turn.
 - If the sources do not contain the answer, say so plainly and stop. Do not \
 guess, and do not pad the answer with what the sources *do* say unless it is \
 genuinely relevant.
@@ -190,13 +223,126 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
     # rewriting.
 
 
+def load_history(supabase, conversation_id, turns: int = HISTORY_TURNS) -> list[dict]:
+    """The last few messages of a conversation, oldest first.
+
+    Takes the caller's client and no user id, exactly like `retrieve` — the
+    `messages_isolation` policy from `001_init.sql` is the boundary, per
+    CLAUDE.md. An id belonging to somebody else returns an empty list here, which
+    is the same thing a conversation with no messages returns, which is correct:
+    both mean "there is no history to use".
+
+    Only `role` and `content` are selected. The `sources` column is deliberately
+    left behind — re-sending the chunks earlier turns retrieved is the version of
+    this feature that costs real money, and those chunks are already baked into
+    the answers as prose (BUILD.md line 387).
+
+    Raises on failure. The router decides that a memory failure should degrade to
+    a history-less answer rather than an error page, and that decision belongs
+    there, not here.
+    """
+    response = (
+        supabase.table("messages")
+        .select("role, content")
+        .eq("conversation_id", str(conversation_id))
+        # Newest first so `limit` takes the *recent* end of the conversation, and
+        # then `role` breaks the tie: both rows of one exchange share a timestamp
+        # (see the note in `conversations.py`). Ascending role puts 'assistant'
+        # above 'user' here — which is what we want, because the whole list is
+        # reversed below and the pair has to land user-then-assistant.
+        .order("created_at", desc=True)
+        .order("role")
+        .limit(turns * 2)
+        .execute()
+    )
+
+    rows = list(reversed(response.data or []))
+
+    return [
+        {"role": row["role"], "content": (row["content"] or "")[:HISTORY_CHARS]}
+        for row in rows
+    ]
+
+    # In plain English: ask the database for this conversation's messages newest
+    # first, keep only the last six rows (three questions and three answers), then
+    # flip them back into reading order — newest-first was only ever a trick to
+    # make `limit` grab the recent end instead of the beginning.
+    #
+    # The final list rebuilds each row as just a role and its text, trimmed to
+    # 1000 characters so one rambling answer cannot inflate the cost of every
+    # question that follows it.
+
+
+def rewrite_query(question: str, history: list[dict]) -> str:
+    """A follow-up question, rewritten to stand on its own.
+
+    This exists for the *vector*, not for the answer. "give count" embeds to
+    nothing useful because the words carry no subject, so retrieval returns noise
+    however good the prompt downstream is. Rewriting happens before `embed_query`
+    or it may as well not happen at all.
+
+    The result is never shown to the user, never saved, and never sent to the
+    answering model — that one keeps the original question, with history in the
+    prompt to explain it.
+
+    Always `DEFAULT_MODEL`, like `generate_title`: a search helper has no business
+    billing the expensive model the caller picked for their answer.
+
+    Raises rather than returning a fallback, again like `generate_title`. The
+    caller's fallback — the original question — is perfectly good, and inventing
+    it down here would hide the failure from the log.
+    """
+    # ponytail: verified 2026-08-12 against the real "give count" exchange — it
+    # resolves the missing subject, leaves standalone questions alone, and does
+    # not drag the old topic into a question that changed the subject. What it
+    # gets wrong is ordinals: "the third one" resolved to the second item in a
+    # list. Retrieval is fuzzy enough to survive that (neighbouring items are
+    # usually in neighbouring chunks) and the answering model still sees the
+    # original question plus the history. Revisit with a stronger model here if
+    # Day 11's eval shows ordinal follow-ups failing.
+    api_key = api_key_for(DEFAULT_MODEL)
+
+    conversation = "\n".join(f"{turn['role']}: {turn['content']}" for turn in history)
+
+    response = litellm.completion(
+        model=DEFAULT_MODEL,
+        messages=[
+            {"role": "system", "content": REWRITE_PROMPT},
+            {
+                "role": "user",
+                "content": f"Conversation so far:\n{conversation}\n\nLatest question: {question}",
+            },
+        ],
+        api_key=api_key,
+        max_tokens=REWRITE_TOKENS,
+    )
+
+    rewritten = (response.choices[0].message.content or "").strip().strip('"')
+
+    if not rewritten:
+        raise ValueError("The model returned an empty rewrite.")
+
+    return rewritten
+
+    # In plain English: the history is flattened into one block of plain text
+    # ("user: ...", "assistant: ...") and handed over as ordinary input rather
+    # than as a real chat exchange. That is on purpose — given a real exchange a
+    # model tends to *continue* the conversation, and we want it to look at the
+    # conversation from outside and edit one sentence.
+
+
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 
 
-def build_messages(question: str, chunks: list[dict], images: dict[str, str]) -> list[dict]:
-    """Assemble the chat messages: system rules, then sources, then the question.
+def build_messages(
+    question: str,
+    chunks: list[dict],
+    images: dict[str, str],
+    history: list[dict] | None = None,
+) -> list[dict]:
+    """Assemble the chat messages: system rules, history, sources, question.
 
     Sources are numbered from 1 in retrieval order, and that number is what the
     model cites. It is deliberately *not* `chunk_index` — that counts position
@@ -211,6 +357,14 @@ def build_messages(question: str, chunks: list[dict], images: dict[str, str]) ->
     prompt, and putting it after the sources also keeps the long, stable part of
     the message first — which is the shape prompt caching would want if we add
     it later.
+
+    `history` goes in as real user/assistant messages rather than as a block of
+    text inside the system prompt: it is the shape a chat model is trained on,
+    and it is less code than flattening. It sits *above* the sources so the last
+    thing the model reads is still this turn's evidence and this turn's question.
+
+    Optional, so the eval harness and the self-check below keep calling this with
+    three arguments and get byte-identical output to before Day 9b.
     """
     parts: list[dict] = []
 
@@ -242,6 +396,7 @@ def build_messages(question: str, chunks: list[dict], images: dict[str, str]) ->
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
+        *(history or []),
         {"role": "user", "content": parts},
     ]
 
@@ -249,6 +404,12 @@ def build_messages(question: str, chunks: list[dict], images: dict[str, str]) ->
     # tagged with who is speaking. "system" is the standing instructions — the
     # rules about citing and not guessing. "user" is this turn's actual input,
     # which here is all the sources plus the question stuck on the end.
+    #
+    # The middle line is the Day 9b addition. `*` means "unpack this list into
+    # this one" — so three past messages become three entries here rather than
+    # one entry holding a list. `history or []` covers the no-history case: an
+    # empty list unpacks to nothing at all, which is why an old three-argument
+    # call still produces exactly the two messages it always did.
 
 
 def to_sources(chunks: list[dict]) -> list[dict]:
@@ -471,6 +632,30 @@ if __name__ == "__main__":
     degraded = build_messages("Did revenue grow?", sample, {})
     assert not [p for p in degraded[1]["content"] if p["type"] == "image_url"], (
         "an unloadable image still produced an image part"
+    )
+
+    # Day 9b: history is spliced between the rules and the sources, and adding it
+    # must not disturb either end of the prompt.
+    past = [
+        {"role": "user", "content": "What does the report cover?"},
+        {"role": "assistant", "content": "Revenue, headcount and costs [1]."},
+    ]
+    with_history = build_messages("Did revenue grow?", sample, fake_images, past)
+
+    assert [m["role"] for m in with_history] == ["system", "user", "assistant", "user"], (
+        "history is not sitting between the system rules and the sources turn"
+    )
+    assert with_history[1]["content"] == "What does the report cover?", (
+        "the past user message was altered on its way into the prompt"
+    )
+    assert with_history[-1]["content"][-1]["text"].endswith("Did revenue grow?"), (
+        "the question is no longer last once history is present"
+    )
+    assert build_messages("Did revenue grow?", sample, fake_images, []) == messages, (
+        "an empty history changed the prompt"
+    )
+    assert build_messages("Did revenue grow?", sample, fake_images, None) == messages, (
+        "a history-less call is no longer identical to the pre-9b prompt"
     )
 
     sources = to_sources(sample)
