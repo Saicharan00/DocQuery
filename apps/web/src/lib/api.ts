@@ -22,6 +22,83 @@ export class AuthNotReadyError extends Error {
 }
 
 /**
+ * Raised when the session is genuinely over — not merely stale.
+ *
+ * The opposite end of `AuthNotReadyError`: that one resolves itself and must be
+ * hidden, this one never resolves itself and must be shown. Thrown only after a
+ * forced token refresh has already been tried and refused, so by the time a
+ * caller sees it there is nothing left to do automatically.
+ */
+export class SessionExpiredError extends Error {
+  constructor(
+    message = "Your session has expired. Refresh the page to sign in again.",
+  ) {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
+
+/**
+ * `fetch` with the bearer token attached, and one forced retry on a 401.
+ *
+ * Clerk hands out a cached token and only refreshes it near expiry, so a 401 is
+ * usually a token that went stale in this tab rather than a session that ended
+ * — a laptop reopened after lunch reaches this line every time. Asking Clerk
+ * again with `skipCache` costs one round trip and fixes that case with nothing
+ * on screen. A second 401 means the session really is gone.
+ *
+ * Shared because `useAuthedFetch` and `useChatStream` differ only in what they
+ * do with the body. Written once in each, the 401 branch was missing from both
+ * — and putting it here means the retry covers JSON, images and the stream
+ * rather than whichever one someone remembered.
+ */
+type TokenGetter = (options?: { skipCache?: boolean }) => Promise<string | null>;
+
+async function fetchWithToken(
+  getToken: TokenGetter,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const send = (token: string) =>
+    fetch(url, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
+    });
+
+  const token = await getToken();
+  if (!token) {
+    // Never interpolate a null token into the header. `Bearer ${null}` becomes
+    // the literal string "Bearer null", which the backend can only report as a
+    // malformed token — indistinguishable from a real failure.
+    throw new AuthNotReadyError("No active session.");
+  }
+
+  const res = await send(token);
+  if (res.status !== 401) {
+    return res;
+  }
+
+  const fresh = await getToken({ skipCache: true });
+  if (!fresh) {
+    throw new SessionExpiredError();
+  }
+
+  const retried = await send(fresh);
+  if (retried.status === 401) {
+    throw new SessionExpiredError();
+  }
+
+  return retried;
+}
+
+// In plain English: attach the token and send the request. Anything other than
+// a 401 comes straight back, untouched — this function has no opinion about
+// ordinary errors. A 401 is the one status it acts on: ask Clerk for a brand
+// new token, skipping the cached one that just failed, and send the identical
+// request a second time. If that is refused too, stop retrying and raise the
+// error the user can actually act on.
+
+/**
  * One authenticated request, handed back as the raw `Response`.
  *
  * Split out of `useApi` because not everything this app fetches is JSON. A
@@ -49,23 +126,9 @@ export function useAuthedFetch() {
         throw new AuthNotReadyError();
       }
 
-      const token = await getToken();
-      if (!token) {
-        // Never interpolate a null token into the header. `Bearer ${null}`
-        // becomes the literal string "Bearer null", which the backend can only
-        // report as a malformed token — indistinguishable from a real failure.
-        throw new AuthNotReadyError("No active session.");
-      }
-
-      const res = await fetch(`${API_URL}${path}`, {
-        ...init,
-        headers: {
-          // Deliberately no Content-Type default: when the body is FormData the
-          // browser has to set it itself, including the multipart boundary.
-          ...init?.headers,
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      // Deliberately no Content-Type default: when the body is FormData the
+      // browser has to set it itself, including the multipart boundary.
+      const res = await fetchWithToken(getToken, `${API_URL}${path}`, init ?? {});
 
       if (!res.ok) {
         throw new Error(await readErrorMessage(res));
@@ -135,20 +198,12 @@ export function useChatStream() {
         throw new AuthNotReadyError();
       }
 
-      const token = await getToken();
-      if (!token) {
-        throw new AuthNotReadyError("No active session.");
-      }
-
-      const res = await fetch(`${API_URL}/chat`, {
+      const res = await fetchWithToken(getToken, `${API_URL}/chat`, {
         method: "POST",
         // Lets the caller cancel: closing the page, or hitting "New chat"
         // mid-answer, aborts the request instead of leaving it running.
         signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 

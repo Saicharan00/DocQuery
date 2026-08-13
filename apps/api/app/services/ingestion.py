@@ -15,6 +15,7 @@ self-check at the bottom of this file exists to defend exactly that.
 from __future__ import annotations
 
 import base64
+import codecs
 import io
 import logging
 import math
@@ -166,10 +167,53 @@ def _parse_docx(data: bytes) -> list[tuple[int, str]]:
     return [(1, text)]
 
 
+# Above this share of unreadable characters, a "text" file is not text we can
+# use. Deliberately loose: a long document with a handful of stray bytes stays
+# under it, which is the case `errors="replace"` was chosen for in the first
+# place.
+UNUSABLE_TEXT_RATIO = 0.1
+
+
 def _parse_txt(data: bytes) -> list[tuple[int, str]]:
+    # Notepad's "Unicode" option writes UTF-16, and on this project's own OS that
+    # is one menu click away. Decoded as UTF-8 it does not fail — every second
+    # byte is a NUL, which is a perfectly legal character — so it would pass the
+    # ratio check below and get embedded as text riddled with nulls. The byte
+    # order mark is the one reliable tell, and testing for it costs a comparison.
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return [(1, data.decode("utf-16"))]
+
+    try:
+        return [(1, data.decode("utf-8-sig"))]
+    except UnicodeDecodeError:
+        pass
+
     # `errors="replace"` rather than a hard failure: one bad byte in an otherwise
     # fine file should not cost the user the whole upload.
-    return [(1, data.decode("utf-8", errors="replace"))]
+    text = data.decode("utf-8", errors="replace")
+
+    # But a file that is *mostly* replacement characters is not a file with one
+    # bad byte — it is a file in an encoding we did not recognise, and embedding
+    # it stores expensive nonsense that no search will ever match. Silence is the
+    # danger here: nothing errors, nothing warns, and the damage only shows up
+    # later as retrieval that inexplicably misses.
+    unusable = text.count("�") + text.count("\x00")
+    if unusable > len(text) * UNUSABLE_TEXT_RATIO:
+        raise ValueError(
+            "This file is not readable as UTF-8 text. Re-save it with UTF-8 "
+            "encoding and upload it again."
+        )
+
+    return [(1, text)]
+
+    # In plain English: try the encodings that can be identified for certain
+    # first — UTF-16 announces itself with a byte order mark, and a strict UTF-8
+    # decode either works or raises. Only when both have been ruled out do we
+    # fall back to decoding loosely, replacing anything unreadable with "�".
+    #
+    # Then count the damage. A few "�" in a long file is the tolerable case the
+    # loose decode exists for. A file that is one tenth "�" or more was never
+    # UTF-8, and is refused with a message telling the user what to change.
 
 
 # ---------------------------------------------------------------------------
