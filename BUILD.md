@@ -741,7 +741,14 @@ the security boundary — this is the difference between claiming it and proving
      - **Chunk-size ablation (400/800/1200)** — every variant re-embeds the whole corpus,
        paid per token.
      - **HyDE / query expansion** — re-ranking delivers more for less.
-     - Ollama, semantic chunking, semantic caching.
+     - **Semantic caching, scoped per conversation** — embed the incoming question, and on a
+       close cosine match to an earlier question *in the same conversation*, replay that
+       answer instead of paying for retrieval + generation. Deferred, not dropped. The
+       global version is the trap: an answer is only valid for one user's document set, so a
+       cross-user cache serves someone else's answer on a false hit, and on a demo with a
+       handful of visitors the hit rate wouldn't pay for the extra embedding call anyway.
+       Per-conversation keeps the document set fixed, which is what makes a hit safe.
+     - Ollama, semantic chunking.
 
      *(Hybrid retrieval and re-ranking moved **out** of this list — they're built and
      measured on Day 11.5.)*
