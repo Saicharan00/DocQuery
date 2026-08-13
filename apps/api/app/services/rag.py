@@ -57,6 +57,27 @@ RETRIEVE_K = 5
 # that decides to enumerate a whole document bills the full output window.
 MAX_ANSWER_TOKENS = 1000
 
+# Wall-clock ceilings on a provider call, in seconds. Passing no timeout does
+# not mean "fast" — it means inheriting `litellm.request_timeout`, which is
+# 6000.0, i.e. a hundred minutes (checked, not assumed, 2026-08-13). A
+# provider that accepts the connection and then goes quiet is the case these
+# bound; until now the only thing that noticed was the browser's idle guard,
+# 20s after the last token, which cannot help the two helpers at all because
+# neither is streamed and so neither has a last token to count from.
+#
+# Two numbers rather than three: `rewrite_query` and `generate_title` are the
+# same shape of call — one short sentence from DEFAULT_MODEL, with a caller
+# already holding a fallback — so both would rather give up early than make the
+# user wait for something optional. The answer itself has no fallback and is the
+# thing the user is actually waiting for, so it gets the patient number.
+#
+# ponytail: this bounds a provider that never responds or stalls between chunks,
+# not the total length of a healthy stream. A model that keeps steadily emitting
+# is bounded by MAX_ANSWER_TOKENS instead. Add a total-duration cap only if a
+# real answer ever legitimately runs that long.
+HELPER_TIMEOUT = 10
+ANSWER_TIMEOUT = 60
+
 # Enough of a chunk to recognise it in a citation, not enough to bloat the
 # `messages.sources` JSON that Day 8 renders on every message.
 PREVIEW_CHARS = 300
@@ -346,6 +367,7 @@ def rewrite_query(question: str, history: list[dict]) -> str:
         ],
         api_key=api_key,
         max_tokens=REWRITE_TOKENS,
+        timeout=HELPER_TIMEOUT,
     )
 
     rewritten = (response.choices[0].message.content or "").strip().strip('"')
@@ -560,6 +582,7 @@ def stream_answer(model: str, messages: list[dict]):
         stream=True,
         api_key=api_key,
         max_tokens=MAX_ANSWER_TOKENS,
+        timeout=ANSWER_TIMEOUT,
     )
 
     for part in response:
@@ -614,6 +637,7 @@ def generate_title(question: str) -> str:
         ],
         api_key=api_key,
         max_tokens=TITLE_TOKENS,
+        timeout=HELPER_TIMEOUT,
     )
 
     title = (response.choices[0].message.content or "").strip().strip('"')

@@ -582,10 +582,29 @@ def ingest_step(
 
     except Exception as exc:
         # The message is stored on the row and shown to the user, so it has to
-        # say something real — "No readable text found…" from `parse`, for
+        # say something real — "Nothing could be read from this file…" above, for
         # instance. Chunks already written stay: a retry resumes from them.
         logger.exception("Ingestion step failed for document %s", document_id)
-        message = str(exc) or exc.__class__.__name__
+
+        # `ValueError` is this codebase talking: `ingestion.parse` on a type it
+        # cannot read, `_parse_txt` on an encoding it cannot recover, and the
+        # empty-file check above. Those sentences were written to be read by the
+        # person who uploaded the file.
+        #
+        # Everything else is a library or a provider talking, and its text is
+        # written for whoever is reading the log — pymupdf's "cannot find
+        # startxref", a storage client quoting the request it just made. That
+        # used to go straight to `str(exc)`, onto the screen, and into the
+        # `documents.error` column that `document-list.tsx:207` renders
+        # verbatim. What lands in a column the user reads is a decision, not
+        # whatever the nearest dependency happened to phrase.
+        if isinstance(exc, ValueError):
+            message = str(exc) or "This file could not be read."
+        else:
+            message = (
+                "Something went wrong while reading this file. "
+                "Please try again, or re-upload it."
+            )
         try:
             _set_status(supabase, document_id, "failed", message[:500])
         except Exception:
