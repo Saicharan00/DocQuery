@@ -81,6 +81,24 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     openai_api_key: str | None = None
 
+    # LangSmith, Day 10a. Every field has a default, so the API boots with no
+    # LangSmith account at all and simply traces nothing — an observability
+    # vendor being unreachable must never be able to take the demo down.
+    #
+    # Both switches are required together in `services/tracing.py`: a key with
+    # `langsmith_tracing` false means "configured but off", which is what makes
+    # it possible to silence tracing without deleting the key.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+
+    # Groups runs in the dashboard. Created on first trace, so no setup needed.
+    langsmith_project: str = "DocQuery"
+
+    # Only load-bearing for an EU account. The SDK defaults to the US host, and
+    # an EU key pointed at the US host authenticates without complaint and lands
+    # the traces nowhere — a failure with no error message anywhere.
+    langsmith_endpoint: str | None = None
+
     # Spend guards. Every embedding is billed to my own Cohere key now that BYOK
     # is gone, so these protect a card, not a free quota.
     max_documents_per_day: int = 15

@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.140.13",
     "httpx>=0.28.1",
     "langchain-text-splitters>=1.1.2",
+    "langsmith>=0.10.15",
     "litellm>=1.94.0",
     "pydantic-settings>=2.14.2",
     "pymupdf>=1.28.0",
