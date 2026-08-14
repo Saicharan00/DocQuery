@@ -8,11 +8,34 @@ import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentList } from "@/components/document-list";
 import { UploadZone } from "@/components/upload-zone";
-import { AuthNotReadyError, useApi } from "@/lib/api";
+import { AuthNotReadyError, ConflictError, useApi } from "@/lib/api";
 import type { Document, IngestStep } from "@/lib/types";
 
 /** How long to wait after a step that made no progress. Cohere's limit is per minute. */
 const RATE_LIMIT_WAIT_MS = 20_000;
+
+/**
+ * How long to wait when the server says somebody else holds this document.
+ *
+ * Short, because the holder is a single in-flight step, not a whole document —
+ * it releases as soon as that request returns.
+ */
+const CONFLICT_WAIT_MS = 2_000;
+
+/**
+ * Documents this tab has given up on. Deliberately outside the component.
+ *
+ * As a ref it died with the component, and that was a bug worth money: leaving
+ * `/dashboard` and coming back mounted a fresh page with an empty set, so a
+ * document you had explicitly abandoned lost its Retry button and was driven
+ * again automatically — billable embedding calls nobody asked for. "This
+ * session" always meant the tab, not the mount, so this is where it belongs.
+ *
+ * ponytail: still cleared by a reload, exactly as before. Surviving that would
+ * mean a column in the database, and a document abandoned last week deserves
+ * another chance anyway.
+ */
+const abandonedDocumentIds = new Set<string>();
 
 export default function DashboardPage() {
   const { user } = useUser();
@@ -64,7 +87,12 @@ export default function DashboardPage() {
   // Refs, not state: changing these must not trigger a re-render, or updating
   // one inside the loop would restart the effect that started the loop.
   const running = useRef<Set<string>>(new Set());
-  const abandoned = useRef<Set<string>>(new Set());
+
+  // One controller per document being driven, so unmounting can stop them.
+  // Without this the `while (!done)` loop below outlived the page: leaving
+  // `/dashboard` did not stop it, and coming back started a *second* loop on
+  // the same document against a fresh, empty `running` set.
+  const controllers = useRef<Map<string, AbortController>>(new Map());
 
   // Documents deleted from under a still-running ingest loop. That loop has
   // no way to notice a delete on its own — it only checks `running`/
@@ -74,17 +102,35 @@ export default function DashboardPage() {
   // ever clear.
   const deletedIds = useRef<Set<string>>(new Set());
 
-  // The same set again, as state, for one reason: the list has to *draw* it.
-  // Reading `abandoned.current` from the JSX is what a ref is explicitly not
-  // for — React's lint rejects it — because nothing about mutating a ref tells
-  // React to paint again.
+  // `abandonedDocumentIds` again, as state, for one reason: the list has to
+  // *draw* it. Reading a plain module-level Set from the JSX would render once
+  // and then never update, because nothing about mutating a Set tells React to
+  // paint again.
   //
-  // So the ref keeps its job (a synchronous guard the ingest loop can consult
-  // and update without provoking a render) and this keeps the other one. It is
-  // deliberately *not* in `ingest`'s dependency list: putting it there would
-  // change that function's identity on every update and restart the effect
-  // below, which is the hazard the refs exist to avoid in the first place.
-  const [abandonedIds, setAbandonedIds] = useState<Set<string>>(new Set());
+  // So the module set keeps its job (a synchronous guard the ingest loop can
+  // consult and update without provoking a render, and which survives leaving
+  // the page) and this keeps the other one. It is deliberately *not* in
+  // `ingest`'s dependency list: putting it there would change that function's
+  // identity on every update and restart the effect below, which is the hazard
+  // the non-reactive set exists to avoid in the first place.
+  //
+  // Seeded from the module-level set rather than empty, so returning to this
+  // page redraws the Retry buttons for whatever you had already given up on.
+  const [abandonedIds, setAbandonedIds] = useState<Set<string>>(
+    () => new Set(abandonedDocumentIds),
+  );
+
+  // Stop every running loop when the page goes away. `controllers.current` is
+  // copied into a local first because by the time the cleanup runs the ref may
+  // already point somewhere else — the standard React caveat about reading a
+  // ref from a cleanup function.
+  useEffect(() => {
+    const inFlight = controllers.current;
+    return () => {
+      inFlight.forEach((controller) => controller.abort());
+      inFlight.clear();
+    };
+  }, []);
 
   const ingest = useCallback(
     async (id: string) => {
@@ -92,17 +138,37 @@ export default function DashboardPage() {
       // this session, is left alone. Without the second guard a document stuck
       // at `processing` would be retried on every refresh — a loop of billable
       // calls that nobody asked for.
-      if (running.current.has(id) || abandoned.current.has(id)) return;
+      if (running.current.has(id) || abandonedDocumentIds.has(id)) return;
       running.current.add(id);
+
+      const controller = new AbortController();
+      controllers.current.set(id, controller);
 
       try {
         let done = false;
         let previous = -1;
 
         while (!done) {
-          const step = await api<IngestStep>(`/documents/${id}/ingest/step`, {
-            method: "POST",
-          });
+          let step: IngestStep;
+
+          try {
+            step = await api<IngestStep>(`/documents/${id}/ingest/step`, {
+              method: "POST",
+              signal: controller.signal,
+            });
+          } catch (e) {
+            if (!(e instanceof ConflictError)) throw e;
+            // Somebody else holds this document's step — a second tab, or this
+            // page's own previous mount still finishing its request. Neither is
+            // a failure and neither is a reason to abandon the document: the
+            // holder releases the moment its request returns, so wait and ask
+            // again. Deliberately `continue` rather than counting this as a
+            // step, so it cannot be mistaken for progress below.
+            await new Promise((resolve) => setTimeout(resolve, CONFLICT_WAIT_MS));
+            if (controller.signal.aborted) return;
+            continue;
+          }
+
           setProgress((current) => ({ ...current, [id]: step }));
           done = step.done;
 
@@ -111,10 +177,16 @@ export default function DashboardPage() {
           // wait it out — the limit is measured per minute.
           if (!done && step.chunks_done === previous) {
             await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_WAIT_MS));
+            // The page may have gone during that 20-second wait.
+            if (controller.signal.aborted) return;
           }
           previous = step.chunks_done;
         }
       } catch (e) {
+        // We stopped it ourselves by leaving the page. Not a failure, and
+        // nothing to draw — the component is on its way out.
+        if (e instanceof DOMException && e.name === "AbortError") return;
+
         // Both lines are inside the guard on purpose. `AuthNotReadyError` means
         // Clerk had not minted a token yet — it is not a failure, and it fixes
         // itself: `api` changes identity the moment the token exists, which
@@ -135,29 +207,49 @@ export default function DashboardPage() {
             // to know this loop was even running.
             return;
           }
-          abandoned.current.add(id);
+          abandonedDocumentIds.add(id);
           // A fresh Set, not the same one mutated: React compares by reference,
           // and handing back the identical object would change nothing on screen.
-          setAbandonedIds(new Set(abandoned.current));
+          setAbandonedIds(new Set(abandonedDocumentIds));
           setDocumentsError((e as Error).message);
         }
       } finally {
         running.current.delete(id);
+        controllers.current.delete(id);
         // Re-fetch either way: the row now says `ready`, or `failed` with the
         // reason on it. Both are things the list should show.
-        await refreshDocuments();
+        //
+        // Except when we were aborted, which means the page is unmounting:
+        // there is no list left to update, and firing a request on the way out
+        // would be work with nowhere to land.
+        if (!controller.signal.aborted) {
+          await refreshDocuments();
+        }
       }
     },
     [api, refreshDocuments],
   );
 
+  // In plain English, the loop above: keep asking the server to do the next
+  // slice of work on this file until it says there is none left, drawing the
+  // progress bar from each reply.
+  //
+  // Three things can interrupt that. The server may say "I am already doing
+  // this one for somebody else" — another tab, or this very page before you
+  // navigated away — in which case we wait a couple of seconds and ask again,
+  // because that is a queue, not a failure. The embedding service may say
+  // "slow down", in which case we wait twenty seconds. And you may leave the
+  // page, in which case we cancel outright: before this, the loop carried on
+  // in the background, and returning to the dashboard started a *second* one
+  // on the same file, so the two of them paid twice for the same pages and
+  // then tripped over each other's writes.
   const retry = useCallback(
     async (id: string) => {
       // Clear the "don't touch this again" mark, since the user has explicitly
       // asked. Ingestion resumes from the chunks already written rather than
       // starting over, so a retry re-embeds nothing it has already paid for.
-      abandoned.current.delete(id);
-      setAbandonedIds(new Set(abandoned.current));
+      abandonedDocumentIds.delete(id);
+      setAbandonedIds(new Set(abandonedDocumentIds));
       setDocumentsError(null);
       await ingest(id);
     },

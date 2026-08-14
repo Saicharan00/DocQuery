@@ -400,11 +400,22 @@ export function ChatView({
   // stream into a component that no longer exists.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Which conversation's history has already been applied. Load-once, and it
+  // has to be: the effect below re-runs whenever `api` changes identity, which
+  // is the very mechanism that retries after `AuthNotReadyError`. Since the
+  // load now *prepends* rather than replaces, a second successful run would
+  // append the whole conversation to itself and every message would appear
+  // twice.
+  //
+  // Only set on success, so the auth retry it is built around still works.
+  const loadedConversation = useRef<string | null>(null);
+
   // Everything said in this conversation before the page was opened. This is
   // the point of Day 9a: without it a reload shows an empty screen, because the
   // messages only ever existed in the React state of a page that has gone.
   useEffect(() => {
     if (!initialConversationId) return;
+    if (loadedConversation.current === initialConversationId) return;
 
     let cancelled = false;
 
@@ -420,8 +431,21 @@ export function ChatView({
       .then((rows) => {
         if (cancelled) return;
         clearTimeout(giveUp);
-        setMessages(
-          rows.map((row) => ({
+        loadedConversation.current = initialConversationId;
+        // Prepend, never replace. `send` is gated on `isLoadingHistory` so in
+        // practice nothing should be on screen yet — this is the second lock on
+        // the same door, and it is here because the failure it prevents is
+        // silent and nasty. A wholesale replace dropped the question you had
+        // just asked and the answer streaming under it, and since `updateLast`
+        // rewrites by *index*, every subsequent token then appended onto the
+        // last historical row — the model's reply visibly growing inside one of
+        // your own user bubbles, with the feedback buttons beneath it rating a
+        // different answer entirely.
+        //
+        // Prepending keeps the live exchange last, which is exactly what
+        // `updateLast` needs, and puts the history where it belongs: before it.
+        setMessages((current) => [
+          ...rows.map((row) => ({
             role: row.role,
             content: row.content,
             // `sources` is null on user rows and on any answer saved before
@@ -433,7 +457,8 @@ export function ChatView({
             // answered before that, and null means no buttons.
             runId: row.run_id,
           })),
-        );
+          ...current,
+        ]);
         setError(null);
         setIsLoadingHistory(false);
       })
@@ -483,7 +508,12 @@ export function ChatView({
     const question = input.trim();
     // An empty question would still cost a Cohere embedding call, and a second
     // send while one is running would interleave two answers into one bubble.
-    if (!question || isStreaming) return;
+    //
+    // `isLoadingHistory` is the third: until the history arrives this component
+    // does not yet know what conversation it is in, and a send started now
+    // would race the load. The guard lives here and not only on the button,
+    // because Enter reaches this function without going through it.
+    if (!question || isStreaming || isLoadingHistory) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -588,7 +618,15 @@ export function ChatView({
           : current;
       });
     }
-  }, [conversationId, input, isStreaming, model, streamChat, updateLast]);
+  }, [
+    conversationId,
+    input,
+    isLoadingHistory,
+    isStreaming,
+    model,
+    streamChat,
+    updateLast,
+  ]);
 
   // "New chat" lives in the sidebar and is an ordinary link to /dashboard/chat.
   // Usually that link unmounts this component and mounts a fresh one, and there
@@ -754,14 +792,23 @@ export function ChatView({
           }}
           rows={2}
           maxLength={2000}
-          placeholder="Ask a question…  (Enter to send, Shift+Enter for a new line)"
-          className="max-h-40 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm field-sizing-content focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          // Disabled while the history loads, so the box matches what `send`
+          // will actually do. Leaving it typable was the visible half of the
+          // bug: the page looked ready, and a question typed into it was
+          // swallowed when the history landed.
+          disabled={isLoadingHistory}
+          placeholder={
+            isLoadingHistory
+              ? "Loading conversation…"
+              : "Ask a question…  (Enter to send, Shift+Enter for a new line)"
+          }
+          className="max-h-40 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm field-sizing-content focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
         />
 
         <Button
           size="icon"
           aria-label="Send"
-          disabled={isStreaming || input.trim() === ""}
+          disabled={isStreaming || isLoadingHistory || input.trim() === ""}
           onClick={() => void send()}
         >
           <Send />
