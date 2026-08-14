@@ -574,8 +574,15 @@ def ingest_step(
             status="ready" if done else "processing",
             # `written` counts chunks, so the last one stored is at index
             # `written - 1`. Guarded because a rate limit can end a step before
-            # anything was written at all.
-            page=chunks[written - 1].page_number if written else 0,
+            # anything was written at all. Also clamped to `total` (chunks
+            # recomputed fresh this step): `written` can start from a resume
+            # point saved in the database on a previous step, and if a parser
+            # or config change makes this parse yield fewer chunks than before,
+            # that saved number can point past the end of the new list.
+            # In plain English: don't trust an old "how far we got" number more
+            # than the list we actually have in hand right now — clamp it down
+            # to fit before using it as an index.
+            page=chunks[min(written, total) - 1].page_number if written else 0,
             pages=max((item.page_number for item in chunks), default=0),
             images_total=images_total,
         )
