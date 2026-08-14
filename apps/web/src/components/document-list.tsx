@@ -24,8 +24,12 @@ type DocumentListProps = {
   abandonedIds: Set<string>;
   /** Resume a failed document from wherever it stopped. */
   onRetry: (id: string) => void | Promise<void>;
-  /** Called after a successful delete so the parent can re-fetch the list. */
-  onDeleted: () => void | Promise<void>;
+  /**
+   * Called after a successful delete so the parent can re-fetch the list.
+   * Takes the deleted id so the parent can also tell an ingest loop still
+   * driving that document that its next 404 is expected, not a failure.
+   */
+  onDeleted: (id: string) => void | Promise<void>;
 };
 
 /** The four states a document moves through as it is ingested. */
@@ -155,7 +159,7 @@ export function DocumentList({
 
       try {
         await api(`/documents/${id}`, { method: "DELETE" });
-        await onDeleted();
+        await onDeleted(id);
       } catch (e) {
         if (e instanceof AuthNotReadyError) {
           setError("Still signing you in. Try again in a moment.");

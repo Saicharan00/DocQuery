@@ -66,6 +66,14 @@ export default function DashboardPage() {
   const running = useRef<Set<string>>(new Set());
   const abandoned = useRef<Set<string>>(new Set());
 
+  // Documents deleted from under a still-running ingest loop. That loop has
+  // no way to notice a delete on its own — it only checks `running`/
+  // `abandoned` at the top of each call, not the document list — so its next
+  // step 404s. This is what tells the catch block below that the 404 it just
+  // got is expected, not a real failure worth an error banner nothing would
+  // ever clear.
+  const deletedIds = useRef<Set<string>>(new Set());
+
   // The same set again, as state, for one reason: the list has to *draw* it.
   // Reading `abandoned.current` from the JSX is what a ref is explicitly not
   // for — React's lint rejects it — because nothing about mutating a ref tells
@@ -119,6 +127,14 @@ export default function DashboardPage() {
         // screen and no way to tell it had. A document is written off for real
         // errors only.
         if (!(e instanceof AuthNotReadyError)) {
+          if (deletedIds.current.has(id)) {
+            // The document was deleted while this loop's request was still
+            // in flight. The 404 that follows is simply the row being gone —
+            // not something to mark abandoned (there is nothing left to
+            // retry) and not something to show the user, who has no reason
+            // to know this loop was even running.
+            return;
+          }
           abandoned.current.add(id);
           // A fresh Set, not the same one mutated: React compares by reference,
           // and handing back the identical object would change nothing on screen.
@@ -146,6 +162,17 @@ export default function DashboardPage() {
       await ingest(id);
     },
     [ingest],
+  );
+
+  const handleDeleted = useCallback(
+    (id: string) => {
+      // Marked before the refetch below, so it's in place by the time it
+      // could possibly matter — the ingest loop's own next request, sent
+      // independently, is the only other thing racing to read this set.
+      deletedIds.current.add(id);
+      return refreshDocuments();
+    },
+    [refreshDocuments],
   );
 
   useEffect(() => {
@@ -204,7 +231,7 @@ export default function DashboardPage() {
               progress={progress}
               abandonedIds={abandonedIds}
               onRetry={retry}
-              onDeleted={refreshDocuments}
+              onDeleted={handleDeleted}
             />
           )}
         </div>

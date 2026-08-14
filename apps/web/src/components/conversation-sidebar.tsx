@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
@@ -92,32 +92,53 @@ export function ConversationSidebar() {
       });
   }, [api]);
 
+  // Holds the ceiling timer's id across renders and across the two effects
+  // below, so the refetch effect can clear the *same* timer the mount effect
+  // started. A ref, not state: nothing on screen depends on this id, and
+  // changing it must not itself trigger a render.
+  const giveUpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     let cancelled = false;
 
-    // The ceiling on that wait. `conversations` staying null is what renders
-    // "Loading…", and on the auth path nothing else ever sets it — so without
-    // this the sidebar waits for a token that may never come, for as long as
-    // the tab is open. Falling back to an empty list rather than a spinner
-    // means the New chat button is still reachable.
-    const giveUp = setTimeout(() => {
+    // The ceiling on the auth wait, started once — on mount, not on every
+    // `pathname` change. It used to live in the same effect as the refetch
+    // below, keyed on `[refresh, pathname]`, so clicking between
+    // conversations (which changes the URL, including via ChatView's
+    // `history.replaceState`) cleared and restarted it on every click. In the
+    // one scenario it exists for — Clerk never becoming ready — someone
+    // clicking around would keep pushing the ceiling back forever and it
+    // might never fire. `conversations` staying null is what renders
+    // "Loading…", and on the auth path nothing else ever sets it, so without
+    // this the sidebar would wait for a token that may never come, for as
+    // long as the tab is open. Falling back to an empty list rather than a
+    // spinner means the New chat button is still reachable.
+    giveUpRef.current = setTimeout(() => {
       if (cancelled) return;
       setConversations((current) => current ?? []);
       setError("Could not load your conversations. Refresh the page to retry.");
     }, AUTH_WAIT_MS);
 
-    void refresh().then((settled) => {
-      if (settled) clearTimeout(giveUp);
-    });
-
     return () => {
       cancelled = true;
-      clearTimeout(giveUp);
+      if (giveUpRef.current) clearTimeout(giveUpRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    void refresh().then((settled) => {
+      if (settled && giveUpRef.current) {
+        clearTimeout(giveUpRef.current);
+        giveUpRef.current = null;
+      }
+    });
   }, [refresh, pathname]);
 
-  // `pathname` is in the dependency list without being used inside — that is
-  // deliberate, and it is the refetch trigger described above.
+  // `pathname` is in this second effect's dependency list without being used
+  // inside its body — that is deliberate, and it is the refetch trigger
+  // described above. It stays separate from the ceiling timer above so a
+  // fast-clicking reader retriggers the refetch without ever touching the
+  // timer meant to survive exactly that.
 
   // Which row is currently a text box instead of a link. One at a time, so a
   // single id is enough state to describe it.
