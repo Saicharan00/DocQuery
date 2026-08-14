@@ -565,8 +565,12 @@ swallowing them, so the next occurrence names itself.
   migration: a rating is only worth having next to the retrieval and the prompt
   that caused it. The thumb and the comment are filed under **different keys**, so
   the score column stays one vote per answer and remains meaningful to average.
-  **Ceiling:** run ids are not stored in Postgres, so an answer reloaded from
-  history cannot be rated — only one from the current session.
+  **Migration 006** stores the run id on the answer's `messages` row, so an
+  answer you come back to is still ratable — which matters, because the answer
+  worth complaining about is usually the one you returned to. It also lets the
+  endpoint *check* the run instead of trusting it: the rating is verified against
+  a row `messages_isolation` will only show its owner. Answers written before 006
+  have no run id and correctly show no buttons.
 - **The Clerk user id is kept out of shareable traces.** It appeared in two
   places, and only one was obvious: the root metadata, *and* the first segment of
   every image path inside the `retrieve` span. Metadata now carries a short
