@@ -490,11 +490,19 @@ def chat(
             # this string is going to a browser.
             yield _event("error", {"detail": "The answer stopped early. Please try again."})
         finally:
-            # The only path that reaches here and nowhere else: the browser going
-            # away mid-answer. That throws GeneratorExit in at whichever `yield`
-            # is suspended, which is not an `Exception` and so misses the handler
-            # above entirely — without this `finally` the trace would sit in the
-            # dashboard claiming to still be running.
+            # Runs on every path that reaches the end of this generator: a
+            # finished answer, an empty one, or a provider failure.
+            #
+            # It does NOT run on client disconnect, which was the original reason
+            # for writing it. Measured 2026-08-14, not assumed: Starlette's
+            # `iterate_in_threadpool` (concurrency.py:51-59) pulls this generator
+            # but has no `finally` closing it, and on disconnect `stream_response`
+            # raises `ClientDisconnect` and abandons it mid-`yield`. Nothing
+            # throws GeneratorExit in, so this block is never entered and the
+            # trace stays "running" in the dashboard. `finished` is still set and
+            # read here so that whatever eventually collects the generator records
+            # the truth. Fixing the abandonment has to happen outside this
+            # function — see the note below the return.
             if failure is None and not finished:
                 failure = "Client disconnected before the answer finished"
             tracing.finish_root(
@@ -519,11 +527,15 @@ def chat(
         # failed, or you closed the tab — and its one job is to write down how
         # this question ended before the record is filed away.
 
-    # ponytail: a browser that disconnects mid-answer loses the exchange — the
-    # generator is closed and `_save_exchange` never runs. Accepted: the user saw
-    # a partial answer they did not keep. The `finally` above now closes the
-    # *trace* on that path, but deliberately does not save; moving the save into
-    # it changes what a conversation contains and is a Day 10b decision.
+    # ponytail: a browser that disconnects mid-answer is abandoned, not closed.
+    # Measured 2026-08-14: Starlette never closes this generator, so `generate()`
+    # is left suspended at a `yield` and THREE things follow from that one cause —
+    # `_save_exchange` never runs, the `finally` above never runs so the trace
+    # stays "running", and the model stream stays open and billable until the
+    # garbage collector happens to get to it. Left alone deliberately in 10a: the
+    # fix belongs outside this function and lands with the `_save_exchange`
+    # decision in 10b. Upgrade path: close the root from an ASGI middleware, or
+    # hand Starlette a wrapper object that owns closing the generator.
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
