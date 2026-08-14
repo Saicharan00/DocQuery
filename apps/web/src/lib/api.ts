@@ -340,7 +340,18 @@ function parseEvent(block: string): ChatEvent | null {
 
   if (!name || !data) return null;
 
-  return { event: name, data: JSON.parse(data) } as ChatEvent;
+  try {
+    return { event: name, data: JSON.parse(data) } as ChatEvent;
+  } catch {
+    // Still a throw — skipping the block would drop part of an answer and let
+    // the rest look complete, which is the one outcome worse than an error.
+    // Only the wording changes. `JSON.parse` raises "Unexpected token < in JSON
+    // at position 0", and that `<` is the first character of `<!DOCTYPE html>`:
+    // a proxy or platform error page arriving where an event should be. The
+    // user can act on "try again"; they can do nothing with a parser's opinion
+    // about angle brackets.
+    throw new Error("The answer stream was corrupted. Please try again.");
+  }
 }
 
 /** Pull FastAPI's `detail` out of an error response so the UI can show it. */

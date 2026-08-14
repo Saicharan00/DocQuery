@@ -13,6 +13,15 @@ type DocumentListProps = {
   documents: Document[];
   /** Live ingestion progress, keyed by document id. Absent until a step returns. */
   progress: Record<string, IngestStep>;
+  /**
+   * Documents this browser session stopped driving, whatever the server thinks.
+   *
+   * Needed because `status` alone is not a reliable answer to "is anything still
+   * happening here". Recording a failure is itself a database write, and if that
+   * write is what failed the row stays on `processing` for ever — a spinner with
+   * no Retry beside it, because Retry used to appear only for `failed`.
+   */
+  abandonedIds: Set<string>;
   /** Resume a failed document from wherever it stopped. */
   onRetry: (id: string) => void | Promise<void>;
   /** Called after a successful delete so the parent can re-fetch the list. */
@@ -129,6 +138,7 @@ function formatDate(iso: string): string {
 export function DocumentList({
   documents,
   progress,
+  abandonedIds,
   onRetry,
   onDeleted,
 }: DocumentListProps) {
@@ -194,14 +204,25 @@ export function DocumentList({
               </p>
 
               {/* Everything below comes from the step responses, not from a
-                  poll — the loop driving ingestion already knows where it is. */}
-              {isWorking(document) && (
+                  poll — the loop driving ingestion already knows where it is.
+                  Suppressed once this session has given up, because a progress
+                  bar that cannot move is a worse lie than no progress bar. */}
+              {isWorking(document) && !abandonedIds.has(document.id) && (
                 <>
                   <ChunkGrid step={progress[document.id]} />
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     {describeProgress(progress[document.id])}
                   </p>
                 </>
+              )}
+
+              {/* The row says `processing` but nothing is driving it any more —
+                  the server never managed to write the failure down. Without
+                  this line the badge alone would suggest work still in flight. */}
+              {isWorking(document) && abandonedIds.has(document.id) && (
+                <p className="mt-1 text-xs text-destructive">
+                  Stopped before this document finished.
+                </p>
               )}
 
               {document.status === "failed" && document.error && (
@@ -215,9 +236,16 @@ export function DocumentList({
               {document.status}
             </Badge>
 
-            {document.status === "failed" && (
+            {(document.status === "failed" ||
+              abandonedIds.has(document.id)) && (
               // Resumes from the chunks already stored, so nothing that was
               // paid for gets embedded twice.
+              //
+              // Gated on "the server called it failed OR this session gave up"
+              // rather than on the status alone. The second half is what covers
+              // a document whose failure could not be recorded: one condition
+              // for every cause of a stalled row, instead of a new branch each
+              // time a new cause turns up.
               <Button
                 variant="outline"
                 size="sm"

@@ -66,6 +66,18 @@ export default function DashboardPage() {
   const running = useRef<Set<string>>(new Set());
   const abandoned = useRef<Set<string>>(new Set());
 
+  // The same set again, as state, for one reason: the list has to *draw* it.
+  // Reading `abandoned.current` from the JSX is what a ref is explicitly not
+  // for — React's lint rejects it — because nothing about mutating a ref tells
+  // React to paint again.
+  //
+  // So the ref keeps its job (a synchronous guard the ingest loop can consult
+  // and update without provoking a render) and this keeps the other one. It is
+  // deliberately *not* in `ingest`'s dependency list: putting it there would
+  // change that function's identity on every update and restart the effect
+  // below, which is the hazard the refs exist to avoid in the first place.
+  const [abandonedIds, setAbandonedIds] = useState<Set<string>>(new Set());
+
   const ingest = useCallback(
     async (id: string) => {
       // A document already being driven, or one that has already failed on us
@@ -95,8 +107,22 @@ export default function DashboardPage() {
           previous = step.chunks_done;
         }
       } catch (e) {
-        abandoned.current.add(id);
+        // Both lines are inside the guard on purpose. `AuthNotReadyError` means
+        // Clerk had not minted a token yet — it is not a failure, and it fixes
+        // itself: `api` changes identity the moment the token exists, which
+        // re-runs the effect below and calls us again.
+        //
+        // Marking the document abandoned out here was the bug. That second call
+        // hit the `abandoned` guard at the top of this function and returned
+        // immediately, while the branch below deliberately shows nothing for
+        // this error — so ingestion stopped for the whole session with an empty
+        // screen and no way to tell it had. A document is written off for real
+        // errors only.
         if (!(e instanceof AuthNotReadyError)) {
+          abandoned.current.add(id);
+          // A fresh Set, not the same one mutated: React compares by reference,
+          // and handing back the identical object would change nothing on screen.
+          setAbandonedIds(new Set(abandoned.current));
           setDocumentsError((e as Error).message);
         }
       } finally {
@@ -115,6 +141,7 @@ export default function DashboardPage() {
       // asked. Ingestion resumes from the chunks already written rather than
       // starting over, so a retry re-embeds nothing it has already paid for.
       abandoned.current.delete(id);
+      setAbandonedIds(new Set(abandoned.current));
       setDocumentsError(null);
       await ingest(id);
     },
@@ -175,6 +202,7 @@ export default function DashboardPage() {
             <DocumentList
               documents={documents}
               progress={progress}
+              abandonedIds={abandonedIds}
               onRetry={retry}
               onDeleted={refreshDocuments}
             />
