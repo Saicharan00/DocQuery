@@ -146,7 +146,15 @@ def embed_query(question: str) -> list[float]:
     # out of the list it hands back.
 
 
-@traceable(run_type="retriever", process_inputs=tracing.clean_inputs)
+@traceable(
+    run_type="retriever",
+    process_inputs=tracing.clean_inputs,
+    # The chunks carry `image_path`, which begins with the owner's Clerk id. This
+    # span is the most-read one in the trace and the likeliest to be shared
+    # publicly, so its output goes through the same redaction as the image
+    # payloads do.
+    process_outputs=tracing.redact,
+)
 def retrieve(supabase, query_vector: list[float], k: int = RETRIEVE_K) -> list[dict]:
     """The k most similar chunks, nearest first.
 
