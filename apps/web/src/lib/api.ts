@@ -22,6 +22,21 @@ export class AuthNotReadyError extends Error {
 }
 
 /**
+ * How long to keep waiting quietly on `AuthNotReadyError` before giving up.
+ *
+ * Ignoring that error is right, but it assumes Clerk always becomes ready in a
+ * moment. When it does not — a dead session, an outage, a blocked request —
+ * nothing else ever clears the waiting state, and the screen says "Loading…"
+ * until the tab is closed. This is the ceiling on the otherwise-correct wait:
+ * long enough that no ordinary sign-in ever reaches it, short enough that a
+ * broken one does not look like a hung page.
+ *
+ * Lives here rather than in each component so the two places that wait on auth
+ * cannot drift apart.
+ */
+export const AUTH_WAIT_MS = 10_000;
+
+/**
  * Raised when the session is genuinely over — not merely stale.
  *
  * The opposite end of `AuthNotReadyError`: that one resolves itself and must be

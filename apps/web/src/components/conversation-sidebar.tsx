@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { AuthNotReadyError, useApi } from "@/lib/api";
+import { AUTH_WAIT_MS, AuthNotReadyError, useApi } from "@/lib/api";
 import type { Conversation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -71,23 +71,49 @@ export function ConversationSidebar() {
     ? pathname.slice(CHAT_PATH.length + 1)
     : null;
 
+  // Resolves to whether this attempt reached a conclusion. Only the
+  // auth-not-ready path answers `false`, and only because that one is expected
+  // to be retried automatically — the caller cannot tell the difference
+  // otherwise, since that error is deliberately swallowed.
   const refresh = useCallback(() => {
     return api<Conversation[]>("/conversations")
       .then((rows) => {
         setConversations(rows);
         setError(null);
+        return true;
       })
       .catch((e: Error) => {
         // Clerk not ready yet. `api` changes identity when it is, which re-runs
         // the effect below — showing an auth error on first paint would be a
         // lie that fixes itself a moment later.
-        if (e instanceof AuthNotReadyError) return;
+        if (e instanceof AuthNotReadyError) return false;
         setError(e.message);
+        return true;
       });
   }, [api]);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+
+    // The ceiling on that wait. `conversations` staying null is what renders
+    // "Loading…", and on the auth path nothing else ever sets it — so without
+    // this the sidebar waits for a token that may never come, for as long as
+    // the tab is open. Falling back to an empty list rather than a spinner
+    // means the New chat button is still reachable.
+    const giveUp = setTimeout(() => {
+      if (cancelled) return;
+      setConversations((current) => current ?? []);
+      setError("Could not load your conversations. Refresh the page to retry.");
+    }, AUTH_WAIT_MS);
+
+    void refresh().then((settled) => {
+      if (settled) clearTimeout(giveUp);
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(giveUp);
+    };
   }, [refresh, pathname]);
 
   // `pathname` is in the dependency list without being used inside — that is
