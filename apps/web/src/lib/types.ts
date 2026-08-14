@@ -89,12 +89,11 @@ export interface ChatMessage {
   sources?: Source[];
   /**
    * The LangSmith trace this answer came from, which is what a rating is
-   * attached to.
+   * attached to. Set both for an answer streamed just now and for one replayed
+   * from history, since migration 006 stores it.
    *
-   * Undefined in two ordinary cases, and both mean "no rating buttons": a user
-   * bubble, and any message loaded from history — `run_id` is not stored in
-   * Postgres, so a reloaded conversation cannot be rated. Null when the server
-   * has tracing switched off and there is no trace to rate.
+   * Null or absent means no rating buttons: a user bubble, an answer from before
+   * that migration, or one produced while the server had tracing switched off.
    */
   runId?: string | null;
 }
@@ -142,6 +141,12 @@ export interface MessageRow {
   content: string;
   model: string | null;
   sources: Source[] | null;
+  /**
+   * The LangSmith run that produced this answer, stored since migration 006.
+   * Null on user rows, on answers written before that migration, and on any
+   * answer produced while tracing was off.
+   */
+  run_id: string | null;
   created_at: string;
 }
 

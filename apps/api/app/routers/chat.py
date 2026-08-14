@@ -197,6 +197,7 @@ def _save_exchange(
     answer: str,
     model: str,
     sources: list[dict],
+    run_id: str | None,
 ) -> None:
     """Write the question and the answer, then touch the conversation.
 
@@ -223,6 +224,11 @@ def _save_exchange(
             "content": answer,
             "model": model,
             "sources": sources,
+            # Only on the assistant row: it names the pipeline run that produced
+            # this text, and a question was not produced by one. Null whenever
+            # tracing is off, which is what keeps saving an answer independent of
+            # whether the observability vendor is switched on.
+            "run_id": run_id,
         },
     ]
 
@@ -479,7 +485,14 @@ def chat(
                 return
 
             _save_exchange(
-                supabase, user_id, conversation_id, request.message, full, request.model, sources
+                supabase,
+                user_id,
+                conversation_id,
+                request.message,
+                full,
+                request.model,
+                sources,
+                str(root.id) if root else None,
             )
 
             if is_new:
