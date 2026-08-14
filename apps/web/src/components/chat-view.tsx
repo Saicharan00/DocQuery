@@ -7,7 +7,12 @@ import { ArrowLeft, Send, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AuthNotReadyError, useApi, useChatStream } from "@/lib/api";
+import {
+  AuthNotReadyError,
+  useApi,
+  useAuthedFetch,
+  useChatStream,
+} from "@/lib/api";
 import {
   MODELS,
   type ChatMessage,
@@ -17,6 +22,98 @@ import {
   type Source,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/**
+ * One cited figure, shown rather than named.
+ *
+ * The picture is not on a URL the browser can simply point at. It lives in a
+ * private Storage bucket, and the only thing allowed to read it is a request
+ * carrying this reader's Clerk token — which an `<img src>` cannot send, since
+ * the browser issues that request itself with no headers of our choosing.
+ *
+ * So the bytes are fetched the ordinary way, with the token attached, and then
+ * handed to `<img>` as an object URL: a short local name standing for a blob
+ * already in memory. Nothing is re-requested when it renders, and the name is
+ * meaningless outside this tab.
+ */
+function ChunkImage({ source }: { source: Source }) {
+  const authedFetch = useAuthedFetch();
+
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const { chunk_id: chunkId, document_id: documentId } = source;
+
+  useEffect(() => {
+    if (!chunkId) return;
+
+    let objectUrl: string | null = null;
+    let cancelled = false;
+
+    authedFetch(`/documents/${documentId}/images/${chunkId}`)
+      .then((res) => res.blob())
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        // Clerk hasn't minted a token yet. `authedFetch` changes identity the
+        // moment it has, which re-runs this effect, so the right move is to
+        // keep showing the placeholder and say nothing.
+        if (e instanceof AuthNotReadyError) return;
+        setFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+      // An object URL pins its blob in memory until it is revoked. Page images
+      // run to hundreds of kilobytes each and a long conversation cites many,
+      // so leaving them would grow the tab's memory for as long as it is open.
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [authedFetch, chunkId, documentId]);
+
+  // In plain English: when this figure appears on screen, ask the server for
+  // its picture with the login token attached, and turn what comes back into a
+  // temporary local address the <img> tag can use. `cancelled` covers scrolling
+  // away or switching conversation before it arrives — the cleanup runs first,
+  // so the reply finds `cancelled` already true and quietly stops. Whatever was
+  // created gets thrown away on the way out, so the memory is handed back.
+
+  // An answer saved before this feature has no chunk id in its stored sources,
+  // so there is nothing to fetch. It keeps its citation and shows no picture.
+  if (!chunkId) return null;
+
+  return (
+    <figure className="mt-2">
+      {failed ? (
+        <p className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+          This figure couldn&apos;t be loaded.
+        </p>
+      ) : url ? (
+        // A plain <img>, not next/image: that component fetches the URL from
+        // its own optimiser, which cannot carry an Authorization header — and
+        // there is nothing for it to optimise, because this is already a blob
+        // sitting in memory.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={source.content_preview || `Figure from ${source.document_name}`}
+          className="max-h-96 w-full rounded-md border bg-background object-contain"
+        />
+      ) : (
+        <div className="h-32 animate-pulse rounded-md border bg-muted-foreground/10" />
+      )}
+
+      <figcaption className="mt-1 text-xs text-muted-foreground">
+        [{source.number}] {source.document_name}
+        {source.page_number !== null && ` · page ${source.page_number}`}
+      </figcaption>
+    </figure>
+  );
+}
 
 /**
  * The citations behind one answer.
@@ -44,8 +141,9 @@ function Sources({ sources }: { sources: Source[] }) {
             </p>
 
             {/* An image chunk has no readable text to preview — what the model
-                was shown is a picture. Displaying it here would need a signed
-                Storage URL the browser doesn't have, so it is named, not shown. */}
+                was shown is a picture, and it is rendered above the citation
+                list by <ChunkImage>. This entry just marks which of the
+                numbered sources that picture was. */}
             {source.chunk_type === "image" ? (
               <Badge variant="secondary" className="mt-1">
                 image
@@ -462,7 +560,11 @@ export function ChatView({
   // actual transition into that path means "start a new chat".
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col p-4">
+    // No `flex-1` here any more. With one, the chat and the feedback box beside
+    // it would each grab half the free width and the chat would sit far left of
+    // centre. Without it the chat takes its natural width — 48rem, or the whole
+    // space on a narrower screen — and the box gets exactly what is left over.
+    <main className="mx-auto flex w-full max-w-3xl flex-col p-4">
       <header className="flex items-center gap-3 border-b pb-3">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/dashboard">
@@ -531,6 +633,18 @@ export function ChatView({
                   </span>
                 )}
               </p>
+
+              {/* Every cited figure, shown under the answer that used it.
+                  Filtered on `chunk_id` as well as the type so an answer from
+                  before that field existed renders nothing rather than a row
+                  of broken placeholders. */}
+              {message.sources
+                ?.filter(
+                  (source) => source.chunk_type === "image" && source.chunk_id,
+                )
+                .map((source) => (
+                  <ChunkImage key={source.chunk_id} source={source} />
+                ))}
 
               {message.sources && message.sources.length > 0 && (
                 <Sources sources={message.sources} />
