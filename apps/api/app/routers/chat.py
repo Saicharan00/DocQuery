@@ -444,7 +444,15 @@ def chat(
         finished = False
 
         try:
-            yield _event("conversation", {"id": str(conversation_id)})
+            # `run_id` rides along here rather than in an event of its own: this
+            # is already the "here is what identifies this exchange" event, and it
+            # arrives before the first token, which is when the browser needs it
+            # to attach a rating to the right answer. `None` when tracing is off —
+            # there is no trace to rate, and the UI hides the buttons.
+            yield _event(
+                "conversation",
+                {"id": str(conversation_id), "run_id": str(root.id) if root else None},
+            )
             yield _event("sources", {"sources": sources})
 
             # This `with` goes around the loop and no higher, and the placement

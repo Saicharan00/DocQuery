@@ -69,7 +69,7 @@ export interface Source {
  * stays silent if the naming call failed.
  */
 export type ChatEvent =
-  | { event: "conversation"; data: { id: string } }
+  | { event: "conversation"; data: { id: string; run_id: string | null } }
   | { event: "sources"; data: { sources: Source[] } }
   | { event: "token"; data: { text: string } }
   | { event: "title"; data: { title: string } }
@@ -87,6 +87,31 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  /**
+   * The LangSmith trace this answer came from, which is what a rating is
+   * attached to.
+   *
+   * Undefined in two ordinary cases, and both mean "no rating buttons": a user
+   * bubble, and any message loaded from history — `run_id` is not stored in
+   * Postgres, so a reloaded conversation cannot be rated. Null when the server
+   * has tracing switched off and there is no trace to rate.
+   */
+  runId?: string | null;
+}
+
+/**
+ * What `POST /feedback` accepts. Mirrors `FeedbackRequest`.
+ *
+ * Both `score` and `comment` are optional, and the server rejects a submission
+ * carrying neither. They are separate because the thumb is sent on click and any
+ * comment afterwards, as its own submission with no score — sending the score
+ * again would count one reader twice in the average.
+ */
+export interface FeedbackBody {
+  run_id: string;
+  /** 1 for a thumbs up, 0 for a thumbs down. */
+  score?: 0 | 1;
+  comment?: string | null;
 }
 
 // ---------------------------------------------------------------------------
