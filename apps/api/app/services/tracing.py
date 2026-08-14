@@ -17,9 +17,10 @@ import logging
 import os
 import re
 from contextlib import nullcontext
+from functools import lru_cache
 from typing import Any
 
-from langsmith import RunTree, tracing_context
+from langsmith import Client, RunTree, tracing_context
 
 # Not exported from the top-level package, but it is the SDK's own answer to
 # "is tracing on?" — it understands the LANGCHAIN_* aliases and the tracing
@@ -167,6 +168,44 @@ def parent(root: RunTree | None):
 # ---------------------------------------------------------------------------
 # Keeping images out of the payload
 # ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _client() -> Client:
+    """One LangSmith client for the process.
+
+    Built lazily rather than at import: constructing it opens a session, and a
+    deployment with tracing switched off should never make one at all.
+    """
+    return Client()
+
+
+def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool:
+    """Attach a reader's verdict to the trace of the answer they read.
+
+    Returns whether it was recorded. `False` means "not stored" — either tracing
+    is off, so there is no trace to hang it on, or the call failed. Both are
+    logged rather than raised: the caller decides what to tell the user, and this
+    module's rule is that nothing in it may break a request.
+
+    The thumb and the sentence go in under **different keys**. `key` is what
+    groups feedback into a column in the LangSmith UI, so a single key holding
+    both would mean the score column gained a second, score-less row every time
+    somebody explained themselves. Two keys keeps "how are the answers doing"
+    answerable by averaging one column, with the comments beside it.
+    """
+    if not tracing_is_enabled():
+        return False
+
+    try:
+        if score is not None:
+            _client().create_feedback(run_id, key="user_rating", score=score)
+        if comment:
+            _client().create_feedback(run_id, key="user_comment", comment=comment)
+        return True
+    except Exception:
+        logger.exception("Could not record feedback for run %s", run_id)
+        return False
 
 
 def anon(user_id: str) -> str:
