@@ -477,6 +477,11 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 **Goal:** Every query traced. Errors are user-friendly.
 
+> **Split 10a / 10b on 2026-08-13**, the same way Days 3, 6 and 9 were.
+> **10a — tracing** (steps 1–6). **10b — the error sweep** (steps 7–8), with the
+> open bugs from the Day 10 pre-work folded in. 10a's code is complete; see the
+> status block below the steps for exactly what is and is not verified.
+
 ### Steps
 
 1. Install `langsmith`.
@@ -488,10 +493,17 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 5. Pick one clean trace, make it publicly shareable, **save that URL** — it goes in the README.
 6. Env vars added to `.env.example` + Railway:
    ```
-   LANGCHAIN_API_KEY=
-   LANGCHAIN_TRACING_V2=true
-   LANGCHAIN_PROJECT=<project-name>
+   LANGSMITH_API_KEY=
+   LANGSMITH_TRACING=true
+   LANGSMITH_PROJECT=<project-name>
+   LANGSMITH_ENDPOINT=https://api.smith.langchain.com
    ```
+   > Renamed from `LANGCHAIN_*` on 2026-08-13. The old names were **not** broken —
+   > `langsmith/utils.py` `get_env_var` takes `namespaces=("LANGSMITH", "LANGCHAIN")`
+   > and tries both, so they are genuine aliases. `LANGSMITH_*` is simply the current
+   > documented spelling. `LANGSMITH_ENDPOINT` is new and matters if the account is
+   > in the EU: the default host is the US one, and an EU account with the US
+   > endpoint sends traces nowhere.
 7. Error handling sweep across the app:
    - LLM: invalid API key, rate limit, timeout, oversized context → user-facing messages
    - Upload: unsupported type, too large, corrupt file
@@ -501,9 +513,55 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 ### Done when
 
-- [ ] Every chat message produces a visible LangSmith trace with the full pipeline breakdown.
+- [x] Every chat message produces a visible LangSmith trace with the full pipeline breakdown.
+      *(Verified locally 2026-08-14: one trace, 7 spans, 0 detached. Railway still to confirm.)*
 - [ ] One trace is public — URL saved.
-- [ ] Every error path shows the user something meaningful.
+- [ ] Every error path shows the user something meaningful. *(10b)*
+
+### Day 10a — what it proved, and what it did not
+
+**Two corrections to the 10a plan, both found by reading the SDK and then measured
+rather than argued.** Neither would have raised an error — both produce a dashboard
+that is quietly wrong.
+
+1. Creating the root run sets **no context variable**, so the `@traceable`
+   decorators cannot see it. The pre-flight needs an explicit "adopt this parent"
+   block or its six spans each open a separate top-level trace.
+2. Inside the streaming generator, that block must sit **directly around the
+   streaming loop**, not at the top. Starlette pulls the generator one chunk at a
+   time, each pull a fresh thread hop with a fresh copy of the context, so a block
+   opened above the first `yield` is already gone when the loop starts. Measured
+   through the real `iterate_in_threadpool`: at the top → `parent=None`; around the
+   loop → attached.
+
+**Verified:** one trace per question with the pipeline nested under it; the
+`retrieve` span carrying similarity scores; the Day 9b rewrite visible and
+*working* — `"give more detail"` became a standalone question and lifted
+similarities from **0.21 to 0.60**; image payloads redacted to `<image: N KB>`
+placeholders (16 of them, zero base64 uploaded); the app boots and answers
+normally with tracing switched off.
+
+**Not verified, and honest about it:**
+
+- **Client disconnect leaves the trace open.** Starlette's `iterate_in_threadpool`
+  has no `finally`, so an abandoned generator is never closed. One cause, three
+  symptoms: no `_save_exchange`, no closed trace, and a model stream left open and
+  billable. **Deferred to 10b**, where it lands with the `_save_exchange` decision
+  it shares a fix with.
+- **The zero-documents 400 path** — needs an account with nothing uploaded.
+- **Railway**, and therefore the public trace URL.
+
+**One real bug surfaced by tracing, cause still unknown.** On one request all four
+image chunks failed to download and the answer went out looking perfectly normal,
+built from text alone. Not reproducible since: the files exist, the paths are
+right, RLS permits them, and both a later request and a fresh cold process loaded
+them fine. `load_images` now logs the exception class and message instead of
+swallowing them, so the next occurrence names itself.
+
+**Measured, for later days:** `embed_query` costs **7.70s on the first call of a
+cold process and 0.11–0.42s afterwards**. Day 7 put the whole pre-model pipeline at
+1.72s, so the first question of any deploy is an outlier, not the norm — worth
+knowing before Day 11 reads timings off traces.
 
 ---
 

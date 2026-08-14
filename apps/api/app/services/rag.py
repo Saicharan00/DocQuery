@@ -17,9 +17,10 @@ import base64
 import logging
 
 import litellm
+from langsmith import traceable
 
 from app.config import get_settings
-from app.services import ingestion
+from app.services import ingestion, tracing
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ genuinely relevant.
 # ---------------------------------------------------------------------------
 
 
+@traceable(run_type="embedding")
 def embed_query(question: str) -> list[float]:
     """Turn the user's question into a vector in the chunks' space.
 
@@ -144,6 +146,7 @@ def embed_query(question: str) -> list[float]:
     # out of the list it hands back.
 
 
+@traceable(run_type="retriever", process_inputs=tracing.clean_inputs)
 def retrieve(supabase, query_vector: list[float], k: int = RETRIEVE_K) -> list[dict]:
     """The k most similar chunks, nearest first.
 
@@ -174,6 +177,13 @@ def retrieve(supabase, query_vector: list[float], k: int = RETRIEVE_K) -> list[d
     # empty list, so the caller never has to check for `None`.
 
 
+@traceable(
+    run_type="tool",
+    process_inputs=tracing.clean_inputs,
+    # The return value is `{path: data URI}` — the one output in the pipeline
+    # that is megabytes of base64 rather than text.
+    process_outputs=tracing.redact,
+)
 def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
     """Fetch the JPEG behind every image chunk, as `{image_path: data URI}`.
 
@@ -196,11 +206,22 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
 
         try:
             jpeg = ingestion.download(supabase, path)
-        except Exception:
-            # No path value in the message beyond the object key, which is not
-            # a secret — but no exception body either, since a storage client
-            # can echo request headers.
-            logger.warning("Could not load image chunk %s; answering without it", path)
+        except Exception as exc:
+            # The exception's class and message, but never the response body: a
+            # storage client can echo request headers, and those must not reach a
+            # log. Storage errors carry their own short message ("Object not
+            # found", an RLS refusal), which is the part worth having.
+            #
+            # This used to log neither. On 2026-08-14 all four images behind one
+            # answer failed and the log said only "answering without it" four
+            # times — enough to know something broke, not enough to know what,
+            # while the answer went out looking perfectly normal.
+            logger.warning(
+                "Could not load image chunk %s; answering without it (%s: %s)",
+                path,
+                type(exc).__name__,
+                exc,
+            )
             continue
 
         images[path] = f"data:image/jpeg;base64,{base64.b64encode(jpeg).decode()}"
@@ -223,6 +244,7 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
     # rewriting.
 
 
+@traceable(run_type="retriever", process_inputs=tracing.clean_inputs)
 def load_history(supabase, conversation_id, turns: int = HISTORY_TURNS) -> list[dict]:
     """The last few messages of a conversation, oldest first.
 
@@ -273,6 +295,7 @@ def load_history(supabase, conversation_id, turns: int = HISTORY_TURNS) -> list[
     # question that follows it.
 
 
+@traceable(run_type="llm")
 def rewrite_query(question: str, history: list[dict]) -> str:
     """A follow-up question, rewritten to stand on its own.
 
@@ -336,6 +359,13 @@ def rewrite_query(question: str, history: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
+@traceable(
+    run_type="prompt",
+    # Both sides carry images: `images` comes in as data URIs and the assembled
+    # prompt has them inlined in its content parts.
+    process_inputs=tracing.clean_inputs,
+    process_outputs=tracing.redact,
+)
 def build_messages(
     question: str,
     chunks: list[dict],
@@ -482,6 +512,14 @@ def api_key_for(model: str) -> str:
     # cannot answer right now.
 
 
+@traceable(
+    run_type="llm",
+    process_inputs=tracing.clean_inputs,
+    # This one is a generator: it yields hundreds of small fragments as the model
+    # types. Without `reduce_fn` the trace records a list of hundreds of scraps
+    # instead of an answer. This glues them back into the string the user saw.
+    reduce_fn=lambda parts: {"answer": "".join(parts)},
+)
 def stream_answer(model: str, messages: list[dict]):
     """Yield the answer one token at a time.
 
@@ -532,6 +570,7 @@ def stream_answer(model: str, messages: list[dict]):
     # it stopped; both are normal and neither should reach the screen.
 
 
+@traceable(run_type="llm")
 def generate_title(question: str) -> str:
     """A few words naming what a conversation is about.
 
