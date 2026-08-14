@@ -44,6 +44,15 @@ export interface IngestStep {
 export interface Source {
   /** 1-based, and the same number the model writes as [1], [2] in its answer. */
   number: number;
+  /**
+   * The chunk's own id, which is what `GET /documents/{document_id}/images/
+   * {chunk_id}` accepts. `image_path` below names the file but cannot be
+   * fetched — it is a Storage path the browser holds no credential for.
+   *
+   * Optional because answers saved before this existed have no such field in
+   * their stored `sources`. Those keep their citations and show no picture.
+   */
+  chunk_id?: string | null;
   document_id: string;
   document_name: string;
   /** Position within its own document — not the citation number. */
@@ -110,6 +119,23 @@ export interface FeedbackBody {
   run_id: string;
   /** 1 for a thumbs up, 0 for a thumbs down. */
   score?: 0 | 1;
+  comment?: string | null;
+}
+
+/**
+ * What `POST /feedback/product` accepts. Mirrors `ProductFeedbackRequest`.
+ *
+ * No `run_id`, and that is the whole difference: this judges DocQuery itself,
+ * so there is no answer and no trace to attach it to. It is stored in the
+ * `product_feedback` table from migration 007 instead.
+ *
+ * Split the same way as the per-answer feedback — stars go the instant they are
+ * clicked, any comment follows as its own submission — so both fields are
+ * optional here and the server refuses one carrying neither.
+ */
+export interface ProductFeedbackBody {
+  /** 1–5 stars. A product has degrees that a single answer does not. */
+  rating?: 1 | 2 | 3 | 4 | 5;
   comment?: string | null;
 }
 

@@ -21,7 +21,18 @@ export class AuthNotReadyError extends Error {
   }
 }
 
-export function useApi() {
+/**
+ * One authenticated request, handed back as the raw `Response`.
+ *
+ * Split out of `useApi` because not everything this app fetches is JSON. A
+ * cited figure comes back as `image/jpeg`, and `useApi` ends in `res.json()`,
+ * which would choke on it. Everything up to that last line is identical, so it
+ * lives here and `useApi` is now a thin JSON wrapper over it.
+ *
+ * Errors are still raised here rather than left to the caller: a failed request
+ * must not reach two different call sites and get two different treatments.
+ */
+export function useAuthedFetch() {
   const { getToken, isLoaded } = useAuth();
 
   // The returned function must keep a stable identity across renders. Anything
@@ -30,10 +41,10 @@ export function useApi() {
   // Clerk memoises `getToken`, so in practice this only changes identity once,
   // when `isLoaded` flips false -> true.
   return useCallback(
-    async function apiFetch<T = unknown>(
+    async function authedFetch(
       path: string,
       init?: RequestInit,
-    ): Promise<T> {
+    ): Promise<Response> {
       if (!isLoaded) {
         throw new AuthNotReadyError();
       }
@@ -60,16 +71,40 @@ export function useApi() {
         throw new Error(await readErrorMessage(res));
       }
 
-      // 204 No Content (our DELETE) has no body — res.json() would throw.
+      return res;
+    },
+    [getToken, isLoaded],
+  );
+}
+
+export function useApi() {
+  const authedFetch = useAuthedFetch();
+
+  return useCallback(
+    async function apiFetch<T = unknown>(
+      path: string,
+      init?: RequestInit,
+    ): Promise<T> {
+      const res = await authedFetch(path, init);
+
+      // 204 No Content (our DELETE, and both feedback endpoints) has no body —
+      // res.json() would throw.
       if (res.status === 204 || res.headers.get("content-length") === "0") {
         return undefined as T;
       }
 
       return (await res.json()) as T;
     },
-    [getToken, isLoaded],
+    [authedFetch],
   );
 }
+
+// In plain English: the first function does everything every request needs —
+// wait for the login to be ready, attach the token, send it, and raise a
+// readable error if the server refused. The second one adds the single step
+// that only makes sense for JSON: read the body and parse it. Anything wanting
+// something other than JSON — a picture — calls the first one directly and
+// reads the body its own way.
 
 // ---------------------------------------------------------------------------
 // Streaming

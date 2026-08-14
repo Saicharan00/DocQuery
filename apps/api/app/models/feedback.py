@@ -1,9 +1,13 @@
-"""What a reader is allowed to say about an answer.
+"""What a reader is allowed to say — about one answer, and about the product.
 
-Deliberately tiny. Feedback is not stored in Postgres — it goes onto the
-LangSmith trace of the answer it is about, so the rating sits next to the
-retrieval, the prompt and the timings that produced it. A separate table would
-hold the same three fields with nothing to join them to.
+Two requests, and the difference between them is where they can possibly be
+stored. `FeedbackRequest` judges one answer, so it goes onto that answer's
+LangSmith trace and never touches Postgres: the rating is only actionable next
+to the retrieval, the prompt and the timings that produced it.
+
+`ProductFeedbackRequest` judges DocQuery as a whole. There is no run behind
+"is this any good", so there is nothing to attach it to and it goes in the
+`product_feedback` table from migration 007 instead.
 """
 
 from __future__ import annotations
@@ -44,3 +48,28 @@ class FeedbackRequest(BaseModel):
     # In plain English: both fields are optional on their own, but a submission
     # with neither is meaningless, so the check above rejects it with a clear
     # reason rather than quietly filing an empty opinion.
+
+
+class ProductFeedbackRequest(BaseModel):
+    """One reader's verdict on DocQuery itself."""
+
+    # No run id, and that absence is the whole reason this model exists rather
+    # than reusing the one above. This opinion is not about anything the
+    # pipeline produced, so there is no trace it could be filed against.
+    #
+    # 1-5 rather than a thumb: a product has degrees ("usable but slow") that a
+    # single answer does not, and a mean of stars stays readable where a mean of
+    # thumbs flattens everything into one number.
+    rating: Literal[1, 2, 3, 4, 5] | None = None
+
+    # Roomier than the per-answer ceiling of 1000. This one goes into our own
+    # database rather than being uploaded to a third party, and someone who
+    # takes the trouble to write a paragraph about the product is exactly the
+    # feedback worth having in full.
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _must_say_something(self) -> "ProductFeedbackRequest":
+        if self.rating is None and not (self.comment or "").strip():
+            raise ValueError("Send a rating, a comment, or both.")
+        return self

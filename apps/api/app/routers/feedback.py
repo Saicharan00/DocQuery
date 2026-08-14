@@ -1,16 +1,19 @@
-"""Was that answer any good?
+"""Was that answer any good? And is DocQuery any good?
 
-One endpoint. It takes a thumb and an optional sentence and writes them onto the
-LangSmith trace of the answer being rated, which is the only place they are worth
-keeping: a score on its own tells you the answer was bad, while a score attached
-to its own trace tells you the retrieval scored 0.18 and four of the five chunks
-were images.
+Two endpoints, and they store their answers in different places because they are
+different questions.
 
-Nothing is written to Postgres, but the caller does not get to name any run they
-like. Since migration 006 the answer's run id is stored on its `messages` row, so
-the rating is checked against a row RLS will only show to its owner — the same
-boundary every other read in this app leans on, rather than a `where user_id`
-this file would have to remember to write.
+`POST /feedback` judges one answer, and writes onto the LangSmith trace of that
+answer. A score on its own tells you the answer was bad; a score attached to its
+own trace tells you the retrieval scored 0.18 and four of the five chunks were
+images. Nothing goes to Postgres, but the caller does not get to name any run
+they like: since migration 006 the answer's run id is stored on its `messages`
+row, so the rating is checked against a row RLS will only show to its owner —
+the same boundary every other read in this app leans on, rather than a
+`where user_id` this file would have to remember to write.
+
+`POST /feedback/product` judges the whole thing, and has no run to attach to, so
+it writes a row to `product_feedback` (migration 007) instead.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.deps import CurrentUser, SupabaseClient
-from app.models.feedback import FeedbackRequest
+from app.models.feedback import FeedbackRequest, ProductFeedbackRequest
 from app.services import tracing
 
 logger = logging.getLogger(__name__)
@@ -77,3 +80,39 @@ def submit_feedback(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="Could not record your feedback. Please try again.",
     )
+
+
+@router.post("/product", status_code=status.HTTP_204_NO_CONTENT)
+def submit_product_feedback(
+    user_id: CurrentUser,
+    supabase: SupabaseClient,
+    request: ProductFeedbackRequest,
+) -> None:
+    """Record one reader's verdict on DocQuery as a whole."""
+    # `user_id` is written explicitly here, unlike every read in this app, and
+    # that is not a retreat from the RLS rule. A read is *filtered* by the
+    # policy; an insert has to supply the column the policy then checks. Sending
+    # somebody else's id is not a way in — `product_feedback_isolation` rejects
+    # the row — but the column cannot be left for the database to guess.
+    try:
+        supabase.table("product_feedback").insert(
+            {
+                "user_id": user_id,
+                "rating": request.rating,
+                "comment": request.comment,
+            }
+        ).execute()
+    except Exception as exc:
+        # `exception` rather than `error` so the traceback reaches the log, and
+        # nothing from `exc` reaches the reader: a database client's message can
+        # carry the statement it tried to run.
+        logger.exception("Could not store product feedback")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not record your feedback. Please try again.",
+        ) from exc
+
+    # In plain English: write one row holding who said it, how many stars they
+    # gave, and anything they typed. If the database refuses for any reason, say
+    # so plainly instead of returning a success the reader would believe — the
+    # detail of *why* stays in the server log, where it is useful and safe.
