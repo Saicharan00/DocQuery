@@ -8,6 +8,7 @@ import { ArrowLeft, Send, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  AUTH_WAIT_MS,
   AuthNotReadyError,
   useApi,
   useAuthedFetch,
@@ -365,9 +366,18 @@ export function ChatView({
 
     let cancelled = false;
 
+    // The ceiling on the quiet wait in the catch below. Cleared by whichever
+    // outcome arrives first, so it only ever fires when nothing arrives at all.
+    const giveUp = setTimeout(() => {
+      if (cancelled) return;
+      setIsLoadingHistory(false);
+      setError("Could not load this conversation. Refresh the page to retry.");
+    }, AUTH_WAIT_MS);
+
     api<MessageRow[]>(`/conversations/${initialConversationId}/messages`)
       .then((rows) => {
         if (cancelled) return;
+        clearTimeout(giveUp);
         setMessages(
           rows.map((row) => ({
             role: row.role,
@@ -390,13 +400,23 @@ export function ChatView({
         // Clerk hasn't produced a token yet. `api` changes identity the moment
         // it has, which re-runs this effect — so the right move is to keep
         // showing "Loading…" and say nothing.
+        //
+        // The timer is deliberately *not* cleared on this path: this is the one
+        // outcome that resolves itself, and it is exactly the case the timer is
+        // there to bound. If the token never arrives, no further call reaches
+        // this component and the timer is the only thing left to speak up.
         if (e instanceof AuthNotReadyError) return;
+        clearTimeout(giveUp);
         setError(e.message);
         setIsLoadingHistory(false);
       });
 
     return () => {
       cancelled = true;
+      // Covers unmount and a re-run of this effect. Without it a load that
+      // succeeded in a second would still be overwritten by an error nine
+      // seconds later.
+      clearTimeout(giveUp);
     };
   }, [api, initialConversationId]);
 
