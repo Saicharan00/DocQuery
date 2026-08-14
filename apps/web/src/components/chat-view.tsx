@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Send } from "lucide-react";
+import { ArrowLeft, Send, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { AuthNotReadyError, useApi, useChatStream } from "@/lib/api";
 import {
   MODELS,
   type ChatMessage,
+  type FeedbackBody,
   type MessageRow,
   type ModelName,
   type Source,
@@ -60,6 +61,155 @@ function Sources({ sources }: { sources: Source[] }) {
     </details>
   );
 }
+
+/**
+ * Was that answer any good?
+ *
+ * The thumb is sent the moment it is clicked, before any comment box appears.
+ * That ordering is deliberate: almost nobody writes a sentence, and asking for
+ * one first would trade the signal most people will give for the one most people
+ * won't.
+ *
+ * The comment is then a second, separate submission carrying no score, because
+ * repeating the score would count one reader's opinion twice in the average.
+ * Both land on the LangSmith trace of this exact answer, so a complaint arrives
+ * attached to the retrieval and the prompt that caused it.
+ */
+function AnswerFeedback({ runId }: { runId: string }) {
+  const api = useApi();
+
+  const [score, setScore] = useState<0 | 1 | null>(null);
+  const [comment, setComment] = useState("");
+  const [commentSent, setCommentSent] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const post = useCallback(
+    async (body: FeedbackBody) => {
+      try {
+        await api("/feedback", {
+          method: "POST",
+          // `useApi` sets no Content-Type by default, because an upload needs
+          // the browser to set its own multipart boundary. JSON has to say so.
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        setFailed(false);
+        return true;
+      } catch {
+        // No message from the server is shown: the reader clicked a thumb, and
+        // the useful thing to tell them is that it didn't stick.
+        setFailed(true);
+        return false;
+      }
+    },
+    [api],
+  );
+
+  const rate = useCallback(
+    (next: 0 | 1) => {
+      // One vote per answer. The buttons disappear after the first, so this only
+      // catches a double-click landing before the re-render.
+      if (score !== null) return;
+      setScore(next);
+      void post({ run_id: runId, score: next }).then((ok) => {
+        // Put the buttons back rather than leaving a rating on screen that was
+        // never recorded.
+        if (!ok) setScore(null);
+      });
+    },
+    [post, runId, score],
+  );
+
+  const sendComment = useCallback(() => {
+    const text = comment.trim();
+    if (!text || commentSent) return;
+    void post({ run_id: runId, comment: text }).then((ok) => {
+      if (ok) setCommentSent(true);
+    });
+  }, [comment, commentSent, post, runId]);
+
+  return (
+    <div className="mt-2 border-t pt-2 text-xs">
+      {score === null ? (
+        <div className="flex items-center gap-1 text-muted-foreground">
+          <span>Was this helpful?</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="This answer was helpful"
+            onClick={() => rate(1)}
+          >
+            <ThumbsUp className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label="This answer was not helpful"
+            onClick={() => rate(0)}
+          >
+            <ThumbsDown className="size-3.5" />
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <p className="text-muted-foreground">
+            {score === 1 ? "Glad that helped." : "Sorry that missed."}{" "}
+            {commentSent
+              ? "Thanks — the detail is more useful than the thumb."
+              : "Anything you'd add? (optional)"}
+          </p>
+
+          {!commentSent && (
+            <div className="flex items-end gap-2">
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    sendComment();
+                  }
+                }}
+                rows={2}
+                // Matches `FeedbackRequest.comment`'s ceiling, so the server
+                // never has to reject something the box let you type.
+                maxLength={1000}
+                placeholder="What was wrong, or what you expected instead"
+                className="max-h-32 flex-1 resize-none rounded-md border bg-background px-2 py-1 text-xs field-sizing-content focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={comment.trim() === ""}
+                onClick={sendComment}
+              >
+                Send
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {failed && (
+        <p role="alert" className="mt-1 text-destructive">
+          Couldn&apos;t record that. Please try again.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// In plain English: this shows a thumbs-up and a thumbs-down under an answer.
+// Clicking one sends it straight away and swaps the buttons for a short thank-you
+// and an optional box for saying more. Sending that box is a second, separate
+// message. If either send fails, the thumbs come back so nothing is claimed that
+// wasn't actually saved.
 
 /**
  * The chat, for one conversation or for a conversation that doesn't exist yet.
@@ -128,6 +278,10 @@ export function ChatView({
             // citations existed. `undefined` is what `ChatMessage` uses for
             // "none", and it is what stops <Sources> rendering an empty box.
             sources: row.sources ?? undefined,
+            // Stored since migration 006, which is what lets an answer you have
+            // come back to still be rated. Null on user rows and on anything
+            // answered before that, and null means no buttons.
+            runId: row.run_id,
           })),
         );
         setError(null);
@@ -201,6 +355,11 @@ export function ChatView({
           case "conversation":
             createdId = event.data.id;
             setConversationId(event.data.id);
+            // Arrives before the first token, and belongs to the bubble being
+            // filled — which is the last one, because `send` pushed it above.
+            // Null when the server has tracing off; `AnswerFeedback` is then
+            // never rendered, so no button can promise something unrecordable.
+            updateLast((message) => ({ ...message, runId: event.data.run_id }));
             break;
           case "sources":
             updateLast((message) => ({ ...message, sources: event.data.sources }));
@@ -376,6 +535,18 @@ export function ChatView({
               {message.sources && message.sources.length > 0 && (
                 <Sources sources={message.sources} />
               )}
+
+              {/* `runId` is absent on user bubbles, and null on answers written
+                  before migration 006 or produced while the server had tracing
+                  off — all of which correctly show no buttons. Everything else
+                  is ratable, including answers replayed from history. The index
+                  check keeps the buttons off the answer still being written,
+                  without hiding them on the ones above it. */}
+              {message.role === "assistant" &&
+                message.runId &&
+                (index !== messages.length - 1 || !isStreaming) && (
+                  <AnswerFeedback runId={message.runId} />
+                )}
             </div>
           </div>
         ))}
