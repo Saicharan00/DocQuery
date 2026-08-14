@@ -69,7 +69,7 @@ export interface Source {
  * stays silent if the naming call failed.
  */
 export type ChatEvent =
-  | { event: "conversation"; data: { id: string } }
+  | { event: "conversation"; data: { id: string; run_id: string | null } }
   | { event: "sources"; data: { sources: Source[] } }
   | { event: "token"; data: { text: string } }
   | { event: "title"; data: { title: string } }
@@ -87,6 +87,30 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  /**
+   * The LangSmith trace this answer came from, which is what a rating is
+   * attached to. Set both for an answer streamed just now and for one replayed
+   * from history, since migration 006 stores it.
+   *
+   * Null or absent means no rating buttons: a user bubble, an answer from before
+   * that migration, or one produced while the server had tracing switched off.
+   */
+  runId?: string | null;
+}
+
+/**
+ * What `POST /feedback` accepts. Mirrors `FeedbackRequest`.
+ *
+ * Both `score` and `comment` are optional, and the server rejects a submission
+ * carrying neither. They are separate because the thumb is sent on click and any
+ * comment afterwards, as its own submission with no score — sending the score
+ * again would count one reader twice in the average.
+ */
+export interface FeedbackBody {
+  run_id: string;
+  /** 1 for a thumbs up, 0 for a thumbs down. */
+  score?: 0 | 1;
+  comment?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +141,12 @@ export interface MessageRow {
   content: string;
   model: string | null;
   sources: Source[] | null;
+  /**
+   * The LangSmith run that produced this answer, stored since migration 006.
+   * Null on user rows, on answers written before that migration, and on any
+   * answer produced while tracing was off.
+   */
+  run_id: string | null;
   created_at: string;
 }
 

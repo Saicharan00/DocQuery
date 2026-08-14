@@ -12,12 +12,15 @@ answer is what the user came for. Every function swallows its own failures and
 logs them, which is the one place in this codebase where swallowing is correct.
 """
 
+import hashlib
 import logging
 import os
+import re
 from contextlib import nullcontext
+from functools import lru_cache
 from typing import Any
 
-from langsmith import RunTree, tracing_context
+from langsmith import Client, RunTree, tracing_context
 
 # Not exported from the top-level package, but it is the SDK's own answer to
 # "is tracing on?" — it understands the LANGCHAIN_* aliases and the tracing
@@ -167,6 +170,88 @@ def parent(root: RunTree | None):
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=1)
+def _client() -> Client:
+    """One LangSmith client for the process.
+
+    Built lazily rather than at import: constructing it opens a session, and a
+    deployment with tracing switched off should never make one at all.
+    """
+    return Client()
+
+
+@lru_cache(maxsize=1)
+def _session_id() -> str | None:
+    """The LangSmith id of our project, looked up once.
+
+    `create_feedback` warns that filing feedback without it is deprecated and
+    "will stop working in a future release", so it is worth one lookup per
+    process. Cached because the answer cannot change while we run, and `None` on
+    failure so a naming or network problem costs the deprecation warning rather
+    than the feedback.
+    """
+    try:
+        return str(_client().read_project(project_name=_settings.langsmith_project).id)
+    except Exception:
+        logger.exception("Could not resolve the LangSmith project id")
+        return None
+
+
+def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool:
+    """Attach a reader's verdict to the trace of the answer they read.
+
+    Returns whether it was recorded. `False` means "not stored" — either tracing
+    is off, so there is no trace to hang it on, or the call failed. Both are
+    logged rather than raised: the caller decides what to tell the user, and this
+    module's rule is that nothing in it may break a request.
+
+    The thumb and the sentence go in under **different keys**. `key` is what
+    groups feedback into a column in the LangSmith UI, so a single key holding
+    both would mean the score column gained a second, score-less row every time
+    somebody explained themselves. Two keys keeps "how are the answers doing"
+    answerable by averaging one column, with the comments beside it.
+    """
+    if not tracing_is_enabled():
+        return False
+
+    session = _session_id()
+
+    try:
+        if score is not None:
+            _client().create_feedback(
+                run_id, key="user_rating", score=score, session_id=session
+            )
+        if comment:
+            _client().create_feedback(
+                run_id, key="user_comment", comment=comment, session_id=session
+            )
+        return True
+    except Exception:
+        logger.exception("Could not record feedback for run %s", run_id)
+        return False
+
+
+def anon(user_id: str) -> str:
+    """A stable short hash of a Clerk user id, for trace metadata.
+
+    A trace can be shared publicly, and a raw Clerk `sub` is a stable identifier
+    that also appears as the first segment of every storage path. Hashing keeps
+    what the tag is *for* — telling one user's traces from another's — while
+    giving a public link nothing to correlate on.
+
+    Still lookup-able when debugging: hash the id you are hunting for and filter
+    on the result. It is one-way to a reader, not to you.
+    """
+    return hashlib.sha256(user_id.encode()).hexdigest()[:12]
+
+
+# The `{user_id}/` prefix that `001_init.sql`'s storage policy requires, and that
+# therefore starts every image path. Matched here so it can be lifted out of trace
+# payloads without losing the rest of the path, which is what tells you which
+# figure was chosen.
+_USER_PREFIX = re.compile(r"^user_[A-Za-z0-9]+/")
+
+
 def redact(value: Any) -> Any:
     """Replace every base64 data URI with a short placeholder, at any depth.
 
@@ -184,7 +269,10 @@ def redact(value: Any) -> Any:
         if value.startswith("data:"):
             # base64 is 4 characters per 3 bytes; close enough for a label.
             return f"<image: {len(value) * 3 // 4 // 1024} KB>"
-        return value
+        # Storage paths start with the owner's Clerk id. Swap that one segment
+        # and keep the rest, so a shared trace still shows which figure was used
+        # without saying whose it was.
+        return _USER_PREFIX.sub("<user>/", value)
     if isinstance(value, dict):
         return {key: redact(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -229,6 +317,19 @@ if __name__ == "__main__":
 
     # Ordinary text is left completely alone.
     assert redact("the ionosphere delays the signal") == "the ionosphere delays the signal"
+
+    # The owner's Clerk id comes out of a storage path; the rest of the path,
+    # which is the part that tells you *which* figure was used, stays.
+    assert redact("user_3ABCdef/doc-id/img-157.jpg") == "<user>/doc-id/img-157.jpg"
+    assert "user_3ABCdef" not in str(redact({"image_path": "user_3ABCdef/d/img-1.jpg"}))
+    # A path that never had the prefix is untouched.
+    assert redact("docs/fig1.jpg") == "docs/fig1.jpg"
+
+    # The metadata tag is stable (so it still groups a user's traces) and one-way
+    # (so a public link has nothing to correlate on).
+    assert anon("user_3ABCdef") == anon("user_3ABCdef")
+    assert anon("user_3ABCdef") != anon("user_9ZYXwvu")
+    assert "user_3ABCdef" not in anon("user_3ABCdef")
 
     # Nested inside the real shapes: load_images' dict, and build_messages' list
     # of content parts.

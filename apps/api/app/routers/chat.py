@@ -197,6 +197,7 @@ def _save_exchange(
     answer: str,
     model: str,
     sources: list[dict],
+    run_id: str | None,
 ) -> None:
     """Write the question and the answer, then touch the conversation.
 
@@ -223,6 +224,11 @@ def _save_exchange(
             "content": answer,
             "model": model,
             "sources": sources,
+            # Only on the assistant row: it names the pipeline run that produced
+            # this text, and a question was not produced by one. Null whenever
+            # tracing is off, which is what keeps saving an answer independent of
+            # whether the observability vendor is switched on.
+            "run_id": run_id,
         },
     ]
 
@@ -318,7 +324,10 @@ def chat(
         name="chat_query",
         inputs={"question": request.message},
         metadata={
-            "user_id": user_id,
+            # Hashed, not raw. A trace can be made public for the README, and a
+            # raw Clerk `sub` is a stable identifier. The hash still separates one
+            # user's traces from another's, which is all this tag is for.
+            "user_id": tracing.anon(user_id),
             "model": request.model,
             "conversation_id": str(request.conversation_id or "new"),
         },
@@ -441,7 +450,15 @@ def chat(
         finished = False
 
         try:
-            yield _event("conversation", {"id": str(conversation_id)})
+            # `run_id` rides along here rather than in an event of its own: this
+            # is already the "here is what identifies this exchange" event, and it
+            # arrives before the first token, which is when the browser needs it
+            # to attach a rating to the right answer. `None` when tracing is off —
+            # there is no trace to rate, and the UI hides the buttons.
+            yield _event(
+                "conversation",
+                {"id": str(conversation_id), "run_id": str(root.id) if root else None},
+            )
             yield _event("sources", {"sources": sources})
 
             # This `with` goes around the loop and no higher, and the placement
@@ -468,7 +485,14 @@ def chat(
                 return
 
             _save_exchange(
-                supabase, user_id, conversation_id, request.message, full, request.model, sources
+                supabase,
+                user_id,
+                conversation_id,
+                request.message,
+                full,
+                request.model,
+                sources,
+                str(root.id) if root else None,
             )
 
             if is_new:
