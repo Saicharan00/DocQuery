@@ -461,6 +461,16 @@ def to_sources(chunks: list[dict]) -> list[dict]:
     return [
         {
             "number": number,
+            # The address of the picture, for an image chunk. `image_path` below
+            # is a Storage path the browser holds no credential for, so it can
+            # name the file but never fetch it; this id is what
+            # `GET /documents/{document_id}/images/{chunk_id}` accepts, and the
+            # database decides whether to answer.
+            #
+            # Absent from every `sources` blob written before this change, so
+            # the UI must treat it as optional — an older answer keeps its
+            # citations and simply shows no picture.
+            "chunk_id": chunk["id"],
             "document_id": chunk["document_id"],
             "document_name": chunk["document_name"],
             "chunk_index": chunk["chunk_index"],
@@ -709,6 +719,13 @@ if __name__ == "__main__":
     assert [s["number"] for s in sources] == [1, 2], "source numbering drifted from the prompt"
     assert sources[1]["chunk_type"] == "image", "the image source lost its type"
     assert len(sources[0]["content_preview"]) <= PREVIEW_CHARS, "preview is not capped"
+
+    # Without this the image endpoint has nothing to be called with, and the
+    # failure would be invisible from here: the answer and its citations would
+    # look exactly right, and only the picture would quietly never appear.
+    assert [s["chunk_id"] for s in sources] == ["c1", "c2"], (
+        "sources lost the chunk id the image endpoint is addressed by"
+    )
 
     assert DEFAULT_MODEL in SUPPORTED_MODELS, "the default model is not in the allowlist"
 
