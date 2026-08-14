@@ -72,6 +72,19 @@ else:
     # Explicitly off, so a stray "True" left in the environment by litellm's
     # load_dotenv cannot switch tracing on behind our back either.
     os.environ["LANGSMITH_TRACING"] = "false"
+    if _settings.langsmith_tracing and not _settings.langsmith_api_key:
+        # The likeliest misconfiguration: tracing wanted, key missing (unset,
+        # blank, or dropped from the deploy's env). This module exists because
+        # a *silent* tracing-off bug already cost real debugging time once —
+        # so this specific case gets a line in the log instead of vanishing
+        # the same way.
+        logger.warning(
+            "LANGSMITH_TRACING is on but LANGSMITH_API_KEY is missing; "
+            "tracing is disabled."
+        )
+    # In plain English: if we wanted tracing but have no key for it, say so in
+    # the log now, rather than leaving it as a mystery for whoever later
+    # notices no traces are showing up.
 
 # Discard anything the SDK looked up and cached before the block above ran.
 # Cheap insurance against the poisoned-cache hazard described there, and it makes
@@ -180,7 +193,9 @@ def _client() -> Client:
     return Client()
 
 
-@lru_cache(maxsize=1)
+_session_id_cache: str | None = None
+
+
 def _session_id() -> str | None:
     """The LangSmith id of our project, looked up once.
 
@@ -189,12 +204,29 @@ def _session_id() -> str | None:
     process. Cached because the answer cannot change while we run, and `None` on
     failure so a naming or network problem costs the deprecation warning rather
     than the feedback.
+
+    Not `@lru_cache`: that would memoize a failed lookup's `None` just as
+    happily as a real id, and a transient network blip on the first call after
+    a deploy would then cost every piece of feedback its `session_id` for the
+    life of the container. A module-level variable lets a failure be retried
+    on the next call instead, while a success is still remembered for good.
     """
+    global _session_id_cache
+    if _session_id_cache is not None:
+        return _session_id_cache
+
     try:
-        return str(_client().read_project(project_name=_settings.langsmith_project).id)
+        _session_id_cache = str(
+            _client().read_project(project_name=_settings.langsmith_project).id
+        )
+        return _session_id_cache
     except Exception:
         logger.exception("Could not resolve the LangSmith project id")
         return None
+    # In plain English: remember the id once we successfully find it, so we
+    # never look it up twice — but if the lookup fails, don't remember the
+    # failure. The next call tries again instead of being stuck with "unknown"
+    # forever.
 
 
 def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool:
@@ -354,5 +386,19 @@ if __name__ == "__main__":
     # Closing a trace that was never opened is a no-op, not a crash — every
     # caller relies on this when tracing is switched off.
     finish_root(None, outputs={"answer": "x"})
+
+    # `_session_id` must retry a failed lookup on the next call rather than
+    # caching the `None` — swap in a fake `_client` that always raises, and
+    # confirm it gets called every time instead of just once.
+    _calls = {"n": 0}
+
+    def _always_fails():
+        _calls["n"] += 1
+        raise RuntimeError("simulated network failure")
+
+    _client = _always_fails  # shadows the module-level function for this check
+    assert _session_id() is None
+    assert _session_id() is None
+    assert _calls["n"] == 2, "a failed lookup must not be cached"
 
     print(f"OK - redaction, arg filtering, None-safety. tracing on: {tracing_is_enabled()}")
