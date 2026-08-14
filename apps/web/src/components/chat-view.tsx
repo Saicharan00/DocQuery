@@ -278,6 +278,10 @@ export function ChatView({
             // citations existed. `undefined` is what `ChatMessage` uses for
             // "none", and it is what stops <Sources> rendering an empty box.
             sources: row.sources ?? undefined,
+            // Stored since migration 006, which is what lets an answer you have
+            // come back to still be rated. Null on user rows and on anything
+            // answered before that, and null means no buttons.
+            runId: row.run_id,
           })),
         );
         setError(null);
@@ -532,12 +536,12 @@ export function ChatView({
                 <Sources sources={message.sources} />
               )}
 
-              {/* Only on a finished answer from this session. `runId` is absent
-                  on user bubbles and on anything loaded from history — run ids
-                  are not stored in Postgres, so a reloaded conversation cannot
-                  be rated — and null when the server has tracing switched off.
-                  The index check keeps the buttons off the answer still being
-                  written, without hiding them on the ones above it. */}
+              {/* `runId` is absent on user bubbles, and null on answers written
+                  before migration 006 or produced while the server had tracing
+                  off — all of which correctly show no buttons. Everything else
+                  is ratable, including answers replayed from history. The index
+                  check keeps the buttons off the answer still being written,
+                  without hiding them on the ones above it. */}
               {message.role === "assistant" &&
                 message.runId &&
                 (index !== messages.length - 1 || !isStreaming) && (
