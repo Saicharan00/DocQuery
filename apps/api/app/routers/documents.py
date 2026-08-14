@@ -19,7 +19,7 @@ from pathlib import PurePosixPath
 from uuid import UUID, uuid4
 
 from cohere.errors import TooManyRequestsError
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from app.config import get_settings
 from app.deps import CurrentUser, SupabaseClient, TokenExpiry
@@ -606,6 +606,98 @@ def _count_chunks(supabase, document_id: UUID) -> int:
         .execute()
     )
     return response.count or 0
+
+
+@router.get(
+    "/{document_id}/images/{chunk_id}",
+    # Without this FastAPI would advertise `application/json` in the schema and
+    # try to serialise the return value as JSON.
+    response_class=Response,
+    responses={200: {"content": {"image/jpeg": {}}}},
+)
+def get_chunk_image(
+    _user_id: CurrentUser,
+    supabase: SupabaseClient,
+    document_id: UUID,
+    chunk_id: UUID,
+) -> Response:
+    """The picture behind one image chunk, so a cited figure can be shown.
+
+    Day 6b put page images in the index and Day 7 started sending them to the
+    model, but the browser was only ever told an image chunk's Storage *path* —
+    a string it has no credential to fetch. So the one thing the reader most
+    wants to see when a figure is cited was the one thing they could not see.
+
+    The chunk is addressed by id, never by path. A path parameter would be a
+    string the caller chooses, and the whole `documents` bucket is one namespace
+    keyed by Clerk id — so it would rest entirely on the storage policy, with
+    this handler contributing nothing. An id is looked up through
+    `chunks_isolation`, which returns nothing at all for a row that is not the
+    caller's, and `document_id` is matched too so a mismatched pair is a 404
+    rather than a quietly-served image from another document.
+    """
+    try:
+        found = (
+            supabase.table("chunks")
+            .select("image_path, chunk_type")
+            .eq("id", str(chunk_id))
+            .eq("document_id", str(document_id))
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("Could not look up image chunk %s", chunk_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not load that image. Please try again.",
+        ) from exc
+
+    row = found.data[0] if found.data else None
+
+    # One 404 for all three misses — not this user's chunk, not an image chunk,
+    # or an image row whose path was never written. They are the same fact to
+    # the reader ("there is no picture here"), and distinguishing them would
+    # tell someone probing ids which ones exist.
+    if not row or row.get("chunk_type") != "image" or not row.get("image_path"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That image is not available.",
+        )
+
+    try:
+        jpeg = ingestion.download(supabase, row["image_path"])
+    except Exception as exc:
+        # Same rule as `rag.load_images`: the exception's class and message, and
+        # never the response body, which a storage client can fill with echoed
+        # request headers.
+        logger.warning(
+            "Could not download image chunk %s (%s: %s)",
+            chunk_id,
+            type(exc).__name__,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That image is not available.",
+        ) from exc
+
+    return Response(
+        content=jpeg,
+        media_type="image/jpeg",
+        # A page image never changes: ingestion writes it once and delete is the
+        # only thing that touches it again. `private` keeps it in this reader's
+        # browser and out of any shared proxy, which matters because the URL is
+        # only safe by virtue of the token that was sent with it.
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+    # In plain English: look up the chunk the browser asked for, but only among
+    # the chunks the database is willing to show this person. If it is not
+    # theirs, is not a picture, or has no file behind it, reply "not available"
+    # — the same reply in each case, so nobody can use the difference to work
+    # out which ids are real. Otherwise fetch the JPEG out of storage and hand
+    # the raw bytes back, telling the browser it may keep its own copy for an
+    # hour but must not let any shared cache do the same.
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
