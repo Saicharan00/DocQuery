@@ -206,11 +206,22 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
 
         try:
             jpeg = ingestion.download(supabase, path)
-        except Exception:
-            # No path value in the message beyond the object key, which is not
-            # a secret — but no exception body either, since a storage client
-            # can echo request headers.
-            logger.warning("Could not load image chunk %s; answering without it", path)
+        except Exception as exc:
+            # The exception's class and message, but never the response body: a
+            # storage client can echo request headers, and those must not reach a
+            # log. Storage errors carry their own short message ("Object not
+            # found", an RLS refusal), which is the part worth having.
+            #
+            # This used to log neither. On 2026-08-14 all four images behind one
+            # answer failed and the log said only "answering without it" four
+            # times — enough to know something broke, not enough to know what,
+            # while the answer went out looking perfectly normal.
+            logger.warning(
+                "Could not load image chunk %s; answering without it (%s: %s)",
+                path,
+                type(exc).__name__,
+                exc,
+            )
             continue
 
         images[path] = f"data:image/jpeg;base64,{base64.b64encode(jpeg).decode()}"
