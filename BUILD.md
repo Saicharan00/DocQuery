@@ -558,6 +558,23 @@ right, RLS permits them, and both a later request and a fresh cold process loade
 them fine. `load_images` now logs the exception class and message instead of
 swallowing them, so the next occurrence names itself.
 
+**Added on 10a, not in the original plan.** Both asked for on 2026-08-14.
+
+- **Answer feedback.** 👍/👎 under each answer, plus an optional comment, written
+  onto that answer's LangSmith trace by `POST /feedback`. No new table and no
+  migration: a rating is only worth having next to the retrieval and the prompt
+  that caused it. The thumb and the comment are filed under **different keys**, so
+  the score column stays one vote per answer and remains meaningful to average.
+  **Ceiling:** run ids are not stored in Postgres, so an answer reloaded from
+  history cannot be rated — only one from the current session.
+- **The Clerk user id is kept out of shareable traces.** It appeared in two
+  places, and only one was obvious: the root metadata, *and* the first segment of
+  every image path inside the `retrieve` span. Metadata now carries a short
+  one-way hash, and storage paths have that segment swapped for `<user>`.
+  **Traces created before this change still contain the raw id.** Note that a
+  public trace still shows the document's *name* and the retrieved text, which is
+  the more revealing part — pick the trace accordingly.
+
 **Measured, for later days:** `embed_query` costs **7.70s on the first call of a
 cold process and 0.11–0.42s afterwards**. Day 7 put the whole pre-model pipeline at
 1.72s, so the first question of any deploy is an outlier, not the norm — worth
