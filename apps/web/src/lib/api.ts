@@ -54,6 +54,23 @@ export class SessionExpiredError extends Error {
 }
 
 /**
+ * Raised on a 409: somebody else is already doing this exact work.
+ *
+ * A distinct class because the status is otherwise lost — `useApi` collapses
+ * every failure into a plain `Error` carrying only the server's `detail`, and
+ * the ingest loop has to tell "this document is already being processed by
+ * another tab" (wait, then carry on) apart from a real failure (stop, and offer
+ * a Retry button). Matching on the message text instead would break the first
+ * time somebody rewords it.
+ */
+export class ConflictError extends Error {
+  constructor(message = "That work is already in progress.") {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+/**
  * `fetch` with the bearer token attached, and one forced retry on a 401.
  *
  * Clerk hands out a cached token and only refreshes it near expiry, so a 401 is
@@ -146,7 +163,13 @@ export function useAuthedFetch() {
       const res = await fetchWithToken(getToken, `${API_URL}${path}`, init ?? {});
 
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        const message = await readErrorMessage(res);
+        // Read the status before it is thrown away. Only 409 needs telling
+        // apart today; everything else is a failure the caller shows verbatim.
+        if (res.status === 409) {
+          throw new ConflictError(message);
+        }
+        throw new Error(message);
       }
 
       return res;
