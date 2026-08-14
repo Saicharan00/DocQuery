@@ -48,10 +48,17 @@ function ChunkImage({ source }: { source: Source }) {
   useEffect(() => {
     if (!chunkId) return;
 
+    // Lets cleanup cancel the request itself, not just its effect on state.
+    // Without this, switching conversation left every in-flight figure
+    // downloading to completion for no one — nothing on screen was still
+    // waiting for it, but the browser had no way to know that.
+    const controller = new AbortController();
     let objectUrl: string | null = null;
     let cancelled = false;
 
-    authedFetch(`/documents/${documentId}/images/${chunkId}`)
+    authedFetch(`/documents/${documentId}/images/${chunkId}`, {
+      signal: controller.signal,
+    })
       .then((res) => res.blob())
       .then((blob) => {
         if (cancelled) return;
@@ -64,15 +71,29 @@ function ChunkImage({ source }: { source: Source }) {
         // moment it has, which re-runs this effect, so the right move is to
         // keep showing the placeholder and say nothing.
         if (e instanceof AuthNotReadyError) return;
+        // Our own cleanup below aborted this fetch — not a real failure, and
+        // showing "couldn't be loaded" for it would be a lie.
+        if (e instanceof DOMException && e.name === "AbortError") return;
         setFailed(true);
       });
 
     return () => {
       cancelled = true;
-      // An object URL pins its blob in memory until it is revoked. Page images
-      // run to hundreds of kilobytes each and a long conversation cites many,
-      // so leaving them would grow the tab's memory for as long as it is open.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      // This cleanup runs on unmount, but also on a *dependency change* —
+      // `chunkId`/`documentId` switching under an already-mounted component,
+      // which is exactly what happens when a click moves to a different
+      // conversation while a figure is still loading. An object URL pins its
+      // blob in memory until it is revoked, so revoking here is right either
+      // way. But `url` state isn't cleared by a revoke — it would keep naming
+      // this now-dead address until the new fetch lands, and `<img src>`
+      // would render broken in the meantime. Clearing it here (only if it's
+      // still this effect's own URL) falls back to the loading placeholder
+      // instead.
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        setUrl((current) => (current === objectUrl ? null : current));
+      }
     };
   }, [authedFetch, chunkId, documentId]);
 
@@ -80,8 +101,13 @@ function ChunkImage({ source }: { source: Source }) {
   // its picture with the login token attached, and turn what comes back into a
   // temporary local address the <img> tag can use. `cancelled` covers scrolling
   // away or switching conversation before it arrives — the cleanup runs first,
-  // so the reply finds `cancelled` already true and quietly stops. Whatever was
-  // created gets thrown away on the way out, so the memory is handed back.
+  // so the reply finds `cancelled` already true and quietly stops. The
+  // `AbortController` goes further and tells the browser to stop downloading
+  // altogether, rather than just ignoring the answer once it shows up.
+  // Whatever was created gets thrown away on the way out, so the memory is
+  // handed back — and if that throw-away happened because the figure being
+  // shown changed (not because this component went away), the on-screen state
+  // is cleared to match, instead of pointing at a URL that no longer works.
 
   // An answer saved before this feature has no chunk id in its stored sources,
   // so there is nothing to fetch. It keeps its citation and shows no picture.
@@ -349,9 +375,25 @@ export function ChatView({
   // depends on which request is in flight.
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    const container = scrollRef.current;
+    if (!container) return;
+
+    // How far the bottom of what's visible is from the true bottom of the
+    // scrollable area. Zero means "already at the bottom".
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    // Only follow the stream if the reader was already near the bottom. Every
+    // streamed token replaces the `messages` array, which used to re-run this
+    // effect and yank the view down hundreds of times per answer — scrolling
+    // up to re-read anything mid-answer was impossible. 100px is a small
+    // enough margin to count as "still following along".
+    if (distanceFromBottom < 100) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
   }, [messages]);
 
   // Leaving the page mid-answer aborts the request rather than leaving it to
@@ -614,7 +656,7 @@ export function ChatView({
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto py-6">
+      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto py-6">
         {isLoadingHistory && (
           <p className="mt-12 text-center text-sm text-muted-foreground">
             Loading conversation…
