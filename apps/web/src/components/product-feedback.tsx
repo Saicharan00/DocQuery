@@ -34,7 +34,12 @@ export function ProductFeedback() {
   const [hovered, setHovered] = useState<Rating | null>(null);
   const [comment, setComment] = useState("");
   const [commentSent, setCommentSent] = useState(false);
-  const [failed, setFailed] = useState(false);
+
+  // The server's own words, not a boolean. A fixed "couldn't record that" is
+  // the same sentence whether the endpoint is missing, the table has not been
+  // created, or the network is down — three different things to go and fix, and
+  // the message was throwing away the only clue which one it was.
+  const [failed, setFailed] = useState<string | null>(null);
 
   const post = useCallback(
     async (body: ProductFeedbackBody) => {
@@ -46,10 +51,19 @@ export function ProductFeedback() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        setFailed(false);
+        setFailed(null);
         return true;
-      } catch {
-        setFailed(true);
+      } catch (e) {
+        // `fetch` rejects with a TypeError when the network itself fails, and
+        // its "Failed to fetch" tells a reader nothing they can act on. Every
+        // other error here already carries a sentence written for a human —
+        // either FastAPI's `detail` or the status line `readErrorMessage`
+        // builds when there isn't one.
+        setFailed(
+          e instanceof TypeError
+            ? "Can't reach the server. Check your connection and try again."
+            : (e as Error).message || "Couldn't record that. Please try again.",
+        );
         return false;
       }
     },
@@ -81,17 +95,29 @@ export function ProductFeedback() {
     });
   }, [comment, commentSent, post]);
 
+  // Small until it has a reason to be big. At rest this is a card asking one
+  // question, so it takes a card's worth of room; it only grows once you have
+  // picked a rating and there is a comment box to write in. Shrinking back
+  // after the comment is sent is the same rule in reverse — there is nothing
+  // left to do in it.
+  const expanded = rating !== null && !commentSent;
+
   // `hidden … xl:flex` and not a narrower breakpoint: the sidebar takes 16rem
   // and the chat is capped at 48rem, so below about 1280px there is no room
-  // left to put this in without squeezing the conversation. It is an opinion
-  // box, and the chat outranks it.
+  // left to put this in at all. `shrink-0` keeps it the size it asked for, and
+  // `self-start` keeps it a card at the top rather than a full-height column.
   return (
-    <aside className="hidden min-w-0 flex-1 flex-col gap-3 overflow-y-auto border-l p-4 xl:flex">
+    <aside
+      className={cn(
+        "m-4 hidden shrink-0 flex-col gap-3 self-start overflow-y-auto rounded-lg border p-4 transition-[width,height] duration-200 xl:flex",
+        // 18rem and 30rem — roughly 3in and 5in at the 96px-per-inch CSS inch.
+        expanded ? "h-[30rem] w-[30rem]" : "h-72 w-72",
+      )}
+    >
       <div>
         <h2 className="text-sm font-medium">How is DocQuery working out?</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          About the whole thing — not one answer. The thumbs under each reply
-          cover those.
+          The whole thing — not one answer.
         </p>
       </div>
 
@@ -186,7 +212,7 @@ export function ProductFeedback() {
 
       {failed && (
         <p role="alert" className="text-xs text-destructive">
-          Couldn&apos;t record that. Please try again.
+          {failed}
         </p>
       )}
     </aside>

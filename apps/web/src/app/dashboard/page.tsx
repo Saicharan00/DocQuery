@@ -18,34 +18,16 @@ export default function DashboardPage() {
   const { user } = useUser();
   const api = useApi();
 
-  const [data, setData] = useState<{ user_id: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const [documents, setDocuments] = useState<Document[] | null>(null);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Guards against a response landing after the component has gone away.
-    let cancelled = false;
-
-    api<{ user_id: string }>("/me")
-      .then((result) => {
-        if (cancelled) return;
-        setData(result);
-        setError(null); // Clear anything left over from an earlier attempt.
-      })
-      .catch((e: Error) => {
-        if (cancelled) return;
-        // Clerk wasn't ready yet. The effect re-runs once it is — nothing to
-        // show the user in the meantime.
-        if (e instanceof AuthNotReadyError) return;
-        setError(e.message);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
+  // The `/me` call that used to live here is gone, along with the line that
+  // printed its answer. It was Day 4 scaffolding: it existed to prove a browser
+  // holding a Clerk token could reach FastAPI and be recognised. Every page
+  // since is that same proof, so all it did now was print the Clerk id on
+  // screen — an identifier worth keeping off a page that gets screenshotted and
+  // screen-shared. It was not doing an auth check; `dashboard/layout.tsx`
+  // redirects on the server before this component ever renders.
 
   // Lives outside the effect because upload and delete will both need to call
   // it to refresh the list.
@@ -167,10 +149,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <p>Email: {user?.primaryEmailAddress?.emailAddress}</p>
-      {error && <p className="text-red-600">Error: {error}</p>}
-      {!data && !error && <p>Loading…</p>}
-      {data && <p>User ID (from API): {data.user_id}</p>}
+      <p className="text-sm text-muted-foreground">
+        Signed in as {user?.primaryEmailAddress?.emailAddress}
+      </p>
 
       <section className="mt-8 border-t pt-6">
         <h2 className="font-medium mb-3">Documents</h2>
