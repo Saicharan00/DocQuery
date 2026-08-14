@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -37,7 +38,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
-from app.deps import CurrentUser, SupabaseClient
+from app.deps import CurrentUser, SupabaseClient, TokenExpiry
 from app.models.chat import ChatRequest
 from app.services import rag, tracing
 
@@ -51,6 +52,29 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # is called while the answer streams, and it is what the conversation keeps
 # forever if the titling call fails.
 TITLE_CHARS = 60
+
+# The answer has to finish while the caller's token is still alive, because
+# `_save_exchange` and `_retitle` ride on that same token — the Supabase client
+# carries it verbatim, which is what makes RLS work. Clerk hands the browser a
+# *cached* token and refreshes it only near expiry, so a request routinely
+# arrives with twenty seconds of life rather than a full minute. Without a
+# deadline the answer reaches the screen complete, the insert then 401s,
+# `_save_exchange` swallows it, and the answer is gone on reload.
+#
+# The margin is the gap left between the last token we emit and the moment the
+# credential dies, so the two writes underneath have room to land.
+TOKEN_SAFETY_MARGIN_SECONDS = 5
+
+# Below this much usable life, refuse before spending anything. A 401 is what
+# makes the browser fetch a fresh token and replay the request — `fetchWithToken`
+# in apps/web/src/lib/api.ts already does exactly that — which costs one round
+# trip and shows nothing on screen.
+#
+# Deliberately *not* `ANSWER_TIMEOUT`, which is the obvious reading and is
+# unsatisfiable: Clerk's session tokens live 60 seconds and `ANSWER_TIMEOUT` is
+# 60, so a brand new token would fail the test too and every request would 401
+# forever. This floor asks only "is there time to say anything useful".
+MIN_ANSWER_BUDGET_SECONDS = 15
 
 
 def _enforce_daily_limit(supabase) -> None:
@@ -299,9 +323,21 @@ def _event(name: str, payload: dict) -> str:
 def chat(
     user_id: CurrentUser,
     supabase: SupabaseClient,
+    expires_at: TokenExpiry,
     request: ChatRequest,
 ) -> StreamingResponse:
     """Answer a question from the caller's own documents, streaming the reply."""
+    # First, before the cap check and before a cent is spent: is this token
+    # going to live long enough to save what it pays for? `expires_at` is
+    # wall-clock, so it is compared against `time.time()`.
+    answer_budget = expires_at - time.time() - TOKEN_SAFETY_MARGIN_SECONDS
+    if answer_budget < MIN_ANSWER_BUDGET_SECONDS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session token is about to expire. Please try again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     _enforce_daily_limit(supabase)
 
     # Before anything is spent: refuse a model this server has no key for. Inside
@@ -448,6 +484,11 @@ def chat(
         # away", which have no other way of telling themselves apart down here.
         failure: str | None = None
         finished = False
+        # The wall-clock moment after which we stop pulling tokens, so the two
+        # writes below still run on a valid credential. Computed once, out here,
+        # rather than per token.
+        deadline = expires_at - TOKEN_SAFETY_MARGIN_SECONDS
+        cut_short = False
 
         try:
             # `run_id` rides along here rather than in an event of its own: this
@@ -474,6 +515,16 @@ def chat(
                 for text in rag.stream_answer(request.model, messages):
                     answer.append(text)
                     yield _event("token", {"text": text})
+                    if time.time() >= deadline:
+                        # Stop mid-answer rather than let the save below fail.
+                        # A cut-off answer that is on screen *and* in the
+                        # history beats a complete one that vanishes on reload.
+                        logger.warning(
+                            "Answer cut short in conversation %s: token expiring",
+                            conversation_id,
+                        )
+                        cut_short = True
+                        break
 
             full = "".join(answer)
             if not full.strip():
@@ -494,6 +545,22 @@ def chat(
                 sources,
                 str(root.id) if root else None,
             )
+
+            if cut_short:
+                # Saved first, then reported — that order is the point of the
+                # whole change. The placeholder title stays: `_retitle` is
+                # another billed completion on a token with seconds left, and a
+                # well-named conversation is worth much less than the answer
+                # actually landing in it.
+                failure = "Cut short: caller's token was about to expire"
+                yield _event(
+                    "error",
+                    {
+                        "detail": "The answer was cut short so it could be saved. "
+                        "Ask again to carry on."
+                    },
+                )
+                return
 
             if is_new:
                 # Its own block: `generate_title` runs in a later hop than the
@@ -546,6 +613,15 @@ def chat(
         # response started with "200 OK" seconds ago — so we send an error
         # *event* and stop. Only once the answer is complete do we glue the
         # pieces back into one string and store it.
+        #
+        # The deadline check inside the loop: the pass we were given at the door
+        # expires, and we need it to still work at the end in order to file the
+        # answer away. So we watch the clock while the words arrive, and if we
+        # get within five seconds of the pass expiring we stop the answer where
+        # it is, file what we have, and say plainly that it was cut short. Half
+        # an answer you can still find tomorrow is worth more than a whole one
+        # that disappears the moment you reload the page — which is exactly what
+        # used to happen, every time an answer outlived the pass.
         #
         # The `finally` at the end runs no matter how we leave — finished,
         # failed, or you closed the tab — and its one job is to write down how

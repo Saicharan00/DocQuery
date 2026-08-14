@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 JWKS_TTL_SECONDS = 3600
 JWKS_MIN_REFETCH_SECONDS = 30
 
+# After a refresh fails, keep serving the cached key set for this long before
+# trying Clerk again. The refresh runs under the lock with a 10s timeout, so
+# without this every queued request pays its own 10s wait and the pile-up
+# outlives the outage that caused it.
+JWKS_FAILURE_BACKOFF_SECONDS = 30
+
 # auto_error=False so a missing header reaches our code and we control the
 # response shape, rather than FastAPI raising a 403 for a missing bearer token.
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -55,6 +61,10 @@ class JwksCache:
     def __init__(self) -> None:
         self._keys: dict[str, dict[str, Any]] = {}
         self._fetched_at: float = 0.0
+        # When the last refresh *failed*. Kept separate from `_fetched_at` on
+        # purpose: marking a failure as a fetch would make the stale keys look
+        # fresh and stop us retrying for a full hour.
+        self._failed_at: float = float("-inf")
         self._lock = asyncio.Lock()
 
     @property
@@ -93,10 +103,38 @@ class JwksCache:
                 # Don't hammer Clerk when a bad `kid` is retried in a loop.
                 raise _unauthorized("Token signing key is not recognised.")
 
+            if time.monotonic() - self._failed_at < JWKS_FAILURE_BACKOFF_SECONDS:
+                # A refresh failed moments ago, so don't attempt another one
+                # yet — for any `kid`. The fetch runs *under this lock* with a
+                # 10s timeout, so retrying per request would serialise every
+                # caller behind a dead endpoint and turn a blip at Clerk into a
+                # longer outage of our own making. One attempt per backoff
+                # window is enough to notice when Clerk comes back.
+                if kid in self._keys:
+                    return self._keys[kid]
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Cannot reach the authentication provider. Try again shortly.",
+                )
+
             try:
                 await self.refresh(jwks_url)
             except Exception as exc:
+                self._failed_at = time.monotonic()
                 logger.error("Could not fetch Clerk signing keys: %s", exc)
+                if kid in self._keys:
+                    # The point of the whole block. RS256 signing keys live for
+                    # months and Clerk rotates them rarely, so a key already in
+                    # hand is almost certainly still valid. Refusing it would
+                    # 503 every authenticated request for the duration of a
+                    # Clerk blip while this process holds the key required to
+                    # serve them. The token's own `exp` and signature are still
+                    # checked by the caller, and the staleness is bounded by
+                    # JWKS_FAILURE_BACKOFF_SECONDS.
+                    logger.warning(
+                        "Serving cached Clerk signing key after a failed refresh"
+                    )
+                    return self._keys[kid]
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Cannot reach the authentication provider. Try again shortly.",
@@ -105,6 +143,28 @@ class JwksCache:
         if kid not in self._keys:
             raise _unauthorized("Token signing key is not recognised.")
         return self._keys[kid]
+
+    # In plain English, the whole of `get_key`: the token says which key signed
+    # it. If we already have that key and our copy is less than an hour old,
+    # hand it straight back — that is the overwhelmingly common path and it
+    # touches the network not at all.
+    #
+    # Otherwise queue up, one request at a time, and look again — somebody
+    # ahead in the queue may have just fetched what we need. If a request in the
+    # last thirty seconds already asked for a key nobody recognises, don't ask
+    # again; that is somebody retrying a junk token in a loop.
+    #
+    # If a fetch failed in the last thirty seconds and we happen to hold the key
+    # being asked for, use our old copy instead of trying again. And if a fetch
+    # is worth attempting but fails, fall back to the old copy anyway when we
+    # have it. These signing keys change perhaps twice a year, so an old copy is
+    # nearly always the same copy — whereas refusing it would sign everybody out
+    # of the app for as long as the login provider is having a bad minute, while
+    # this server sits on the very key it needs.
+    #
+    # Only if the key is genuinely one we have never seen do we give up: either
+    # "we cannot reach the login provider" if the fetch broke, or "we do not
+    # recognise this token" if it worked and the key still was not there.
 
 
 jwks_cache = JwksCache()
