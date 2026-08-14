@@ -318,7 +318,10 @@ def chat(
         name="chat_query",
         inputs={"question": request.message},
         metadata={
-            "user_id": user_id,
+            # Hashed, not raw. A trace can be made public for the README, and a
+            # raw Clerk `sub` is a stable identifier. The hash still separates one
+            # user's traces from another's, which is all this tag is for.
+            "user_id": tracing.anon(user_id),
             "model": request.model,
             "conversation_id": str(request.conversation_id or "new"),
         },
