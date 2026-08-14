@@ -180,6 +180,23 @@ def _client() -> Client:
     return Client()
 
 
+@lru_cache(maxsize=1)
+def _session_id() -> str | None:
+    """The LangSmith id of our project, looked up once.
+
+    `create_feedback` warns that filing feedback without it is deprecated and
+    "will stop working in a future release", so it is worth one lookup per
+    process. Cached because the answer cannot change while we run, and `None` on
+    failure so a naming or network problem costs the deprecation warning rather
+    than the feedback.
+    """
+    try:
+        return str(_client().read_project(project_name=_settings.langsmith_project).id)
+    except Exception:
+        logger.exception("Could not resolve the LangSmith project id")
+        return None
+
+
 def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool:
     """Attach a reader's verdict to the trace of the answer they read.
 
@@ -197,11 +214,17 @@ def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool
     if not tracing_is_enabled():
         return False
 
+    session = _session_id()
+
     try:
         if score is not None:
-            _client().create_feedback(run_id, key="user_rating", score=score)
+            _client().create_feedback(
+                run_id, key="user_rating", score=score, session_id=session
+            )
         if comment:
-            _client().create_feedback(run_id, key="user_comment", comment=comment)
+            _client().create_feedback(
+                run_id, key="user_comment", comment=comment, session_id=session
+            )
         return True
     except Exception:
         logger.exception("Could not record feedback for run %s", run_id)
