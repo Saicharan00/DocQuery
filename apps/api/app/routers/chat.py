@@ -39,7 +39,7 @@ from fastapi.responses import StreamingResponse
 from app.config import get_settings
 from app.deps import CurrentUser, SupabaseClient
 from app.models.chat import ChatRequest
-from app.services import rag
+from app.services import rag, tracing
 
 logger = logging.getLogger(__name__)
 
@@ -309,77 +309,122 @@ def chat(
             detail=str(exc),
         ) from exc
 
-    # Day 9b. Deliberately a plain select rather than `_resolve_conversation`,
-    # which stays where it is further down: that function *creates* the row, and
-    # moving it above the embed call would leave an empty conversation in the
-    # sidebar every time embedding failed. A bogus or foreign id costs one
-    # indexed lookup here, returns nothing (RLS), and still gets its clean 404
-    # from `_resolve_conversation` later.
-    history: list[dict] = []
-    if request.conversation_id is not None:
-        try:
-            history = rag.load_history(supabase, request.conversation_id)
-        except Exception:
-            # Degrade to Day 9a: an answer with no memory beats an error page.
-            logger.exception("Could not load history for %s", request.conversation_id)
-
-    search_query = request.message
-    if history:
-        try:
-            search_query = rag.rewrite_query(request.message, history)
-            # Logged because Day 11 has to be able to audit what the retriever
-            # actually saw. The rewrite is otherwise invisible: it is never sent
-            # to the answering model, never saved, and never shown to the user.
-            logger.info("Rewrote %r as %r", request.message, search_query)
-        except Exception:
-            logger.exception("Query rewrite failed; searching the original question")
-
-    # In plain English: if this message belongs to an existing conversation, read
-    # the last few messages of it. If there are any, ask the cheap model to turn
-    # the question into one that makes sense on its own — "give count" becomes
-    # "how many factors affect positioning accuracy?" — and search with that
-    # instead. A first message has no history, so both steps are skipped and cost
-    # nothing. If either step breaks we keep the original question and carry on,
-    # which is exactly how this endpoint behaved yesterday.
-
-    try:
-        query_vector = rag.embed_query(search_query)
-    except Exception as exc:
-        logger.exception("Embedding the question failed")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not understand the question right now. Please try again.",
-        ) from exc
-
-    try:
-        chunks = rag.retrieve(supabase, query_vector)
-    except Exception as exc:
-        logger.exception("Vector search failed")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not search your documents. Please try again.",
-        ) from exc
-
-    if not chunks:
-        # Nothing to ground an answer in. Asking the model anyway would produce a
-        # confident answer from its own training data, which is the exact failure
-        # this whole app exists to avoid.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No documents to search yet. Upload one and wait for it to finish processing.",
-        )
-
-    images = rag.load_images(supabase, chunks)
-    # `request.message`, never `search_query`. The user asked "give count" and
-    # that is the question the model answers; the rewrite existed only to produce
-    # a better vector, and it has already done that. History is in the prompt to
-    # make the original question legible.
-    messages = rag.build_messages(request.message, chunks, images, history)
-    sources = rag.to_sources(chunks)
-
-    conversation_id, is_new = _resolve_conversation(
-        supabase, user_id, request.conversation_id, request.message
+    # The trace opens here rather than at the top of the function on purpose. The
+    # two guards above refuse before a cent is spent, and a trace should mean "a
+    # real attempt happened", not "somebody knocked". `conversation_id` is "new"
+    # when the request carries none; the resolved UUID is attached when the root
+    # is closed, by which point `_resolve_conversation` has produced it.
+    root = tracing.start_root(
+        name="chat_query",
+        inputs={"question": request.message},
+        metadata={
+            "user_id": user_id,
+            "model": request.model,
+            "conversation_id": str(request.conversation_id or "new"),
+        },
+        tags=[request.model],
     )
+
+    # `tracing.parent(root)` is not decoration, and leaving it out is the quiet
+    # failure mode: `start_root` only builds the run object, it sets nothing that
+    # the `@traceable` decorators in rag.py can see. Without this block each of
+    # them would open its own top-level trace and one question would arrive in
+    # the dashboard as six unrelated fragments — no error, just a useless
+    # dashboard.
+    #
+    # The try/except exists because a hand-made root is closed by nobody. The
+    # three `raise HTTPException` paths below would otherwise leave a run marked
+    # "running" in the UI forever, which reads as a hung request — worse than no
+    # trace at all. One handler, not three: `repr()` on an HTTPException already
+    # prints its status and detail, and this text goes to our own dashboard, not
+    # to a browser.
+    try:
+        with tracing.parent(root):
+            # Day 9b. Deliberately a plain select rather than
+            # `_resolve_conversation`, which stays where it is further down: that
+            # function *creates* the row, and moving it above the embed call
+            # would leave an empty conversation in the sidebar every time
+            # embedding failed. A bogus or foreign id costs one indexed lookup
+            # here, returns nothing (RLS), and still gets its clean 404 from
+            # `_resolve_conversation` later.
+            history: list[dict] = []
+            if request.conversation_id is not None:
+                try:
+                    history = rag.load_history(supabase, request.conversation_id)
+                except Exception:
+                    # Degrade to Day 9a: an answer with no memory beats an error page.
+                    logger.exception("Could not load history for %s", request.conversation_id)
+
+            search_query = request.message
+            if history:
+                try:
+                    search_query = rag.rewrite_query(request.message, history)
+                    # Kept alongside the span: Railway logs are what you reach
+                    # for when LangSmith is switched off or unreachable, and this
+                    # rewrite is otherwise invisible — never sent to the
+                    # answering model, never saved, never shown to the user.
+                    logger.info("Rewrote %r as %r", request.message, search_query)
+                except Exception:
+                    logger.exception("Query rewrite failed; searching the original question")
+
+            # In plain English: if this message belongs to an existing
+            # conversation, read the last few messages of it. If there are any,
+            # ask the cheap model to turn the question into one that makes sense
+            # on its own — "give count" becomes "how many factors affect
+            # positioning accuracy?" — and search with that instead. A first
+            # message has no history, so both steps are skipped and cost nothing.
+            # If either step breaks we keep the original question and carry on,
+            # which is exactly how this endpoint behaved yesterday.
+
+            try:
+                query_vector = rag.embed_query(search_query)
+            except Exception as exc:
+                logger.exception("Embedding the question failed")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Could not understand the question right now. Please try again.",
+                ) from exc
+
+            try:
+                chunks = rag.retrieve(supabase, query_vector)
+            except Exception as exc:
+                logger.exception("Vector search failed")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Could not search your documents. Please try again.",
+                ) from exc
+
+            if not chunks:
+                # Nothing to ground an answer in. Asking the model anyway would
+                # produce a confident answer from its own training data, which is
+                # the exact failure this whole app exists to avoid.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No documents to search yet. Upload one and wait for it to finish processing.",
+                )
+
+            images = rag.load_images(supabase, chunks)
+            # `request.message`, never `search_query`. The user asked "give
+            # count" and that is the question the model answers; the rewrite
+            # existed only to produce a better vector, and it has already done
+            # that. History is in the prompt to make the original question
+            # legible.
+            messages = rag.build_messages(request.message, chunks, images, history)
+            sources = rag.to_sources(chunks)
+
+            conversation_id, is_new = _resolve_conversation(
+                supabase, user_id, request.conversation_id, request.message
+            )
+    except Exception as exc:
+        tracing.finish_root(root, error=repr(exc))
+        raise
+
+    # In plain English, the two lines around all of that: open one record for
+    # this whole question and keep hold of it. Everything indented underneath
+    # gets filed inside that record rather than lying around loose. If any of it
+    # fails, we close the record with the reason before letting the failure carry
+    # on to the user — a record nobody closed sits in the dashboard claiming the
+    # request is still running, which is more misleading than having no record.
 
     def generate():
         """Emit the answer as SSE, then save it.
@@ -389,39 +434,75 @@ def chat(
         rendered as `[1]` appears rather than after the answer settles.
         """
         answer: list[str] = []
+        # What the trace says happened. `failure` stays None on a clean answer;
+        # `finished` distinguishes "we sent everything" from "the browser went
+        # away", which have no other way of telling themselves apart down here.
+        failure: str | None = None
+        finished = False
 
         try:
             yield _event("conversation", {"id": str(conversation_id)})
             yield _event("sources", {"sources": sources})
 
-            for text in rag.stream_answer(request.model, messages):
-                answer.append(text)
-                yield _event("token", {"text": text})
+            # This `with` goes around the loop and no higher, and the placement
+            # is the whole trick. Starlette pulls this generator one chunk at a
+            # time, and each pull is a separate hop into the thread pool carrying
+            # a *fresh copy* of the invisible context — so a block opened above
+            # the first `yield` has already been forgotten by the time the loop
+            # starts. Here, entering the block and pulling `stream_answer`'s
+            # first token happen in the same hop, and that first pull is the
+            # moment `@traceable` decides who its parent is. From then on the
+            # span carries its own parent and stops caring about the context.
+            with tracing.parent(root):
+                for text in rag.stream_answer(request.model, messages):
+                    answer.append(text)
+                    yield _event("token", {"text": text})
+
+            full = "".join(answer)
+            if not full.strip():
+                # A model that returned nothing must not leave a blank bubble in
+                # the history forever. Report it, save nothing.
+                logger.error("Model %s returned an empty answer", request.model)
+                failure = "The model returned an empty answer"
+                yield _event("error", {"detail": "The model returned an empty answer. Please try again."})
+                return
+
+            _save_exchange(
+                supabase, user_id, conversation_id, request.message, full, request.model, sources
+            )
+
+            if is_new:
+                # Its own block: `generate_title` runs in a later hop than the
+                # loop above, so the parent has to be re-established or its span
+                # floats off on its own. No `yield` inside, so nothing can
+                # suspend it half-way.
+                with tracing.parent(root):
+                    title = _retitle(supabase, conversation_id, request.message)
+                if title:
+                    yield _event("title", {"title": title})
+
+            finished = True
+            yield _event("done", {})
         except Exception:
             logger.exception("Generation failed in conversation %s", conversation_id)
+            failure = "Generation failed"
             # No exception text: a provider error can echo request details, and
             # this string is going to a browser.
             yield _event("error", {"detail": "The answer stopped early. Please try again."})
-            return
-
-        full = "".join(answer)
-        if not full.strip():
-            # A model that returned nothing must not leave a blank bubble in the
-            # history forever. Report it, save nothing.
-            logger.error("Model %s returned an empty answer", request.model)
-            yield _event("error", {"detail": "The model returned an empty answer. Please try again."})
-            return
-
-        _save_exchange(
-            supabase, user_id, conversation_id, request.message, full, request.model, sources
-        )
-
-        if is_new:
-            title = _retitle(supabase, conversation_id, request.message)
-            if title:
-                yield _event("title", {"title": title})
-
-        yield _event("done", {})
+        finally:
+            # The only path that reaches here and nowhere else: the browser going
+            # away mid-answer. That throws GeneratorExit in at whichever `yield`
+            # is suspended, which is not an `Exception` and so misses the handler
+            # above entirely — without this `finally` the trace would sit in the
+            # dashboard claiming to still be running.
+            if failure is None and not finished:
+                failure = "Client disconnected before the answer finished"
+            tracing.finish_root(
+                root,
+                outputs={"answer": "".join(answer)},
+                error=failure,
+                metadata={"conversation_id": str(conversation_id)},
+            )
 
         # In plain English, the block above: collect every piece of text as it
         # streams past, sending each one to the browser the moment it arrives.
@@ -433,11 +514,16 @@ def chat(
         # response started with "200 OK" seconds ago — so we send an error
         # *event* and stop. Only once the answer is complete do we glue the
         # pieces back into one string and store it.
+        #
+        # The `finally` at the end runs no matter how we leave — finished,
+        # failed, or you closed the tab — and its one job is to write down how
+        # this question ended before the record is filed away.
 
     # ponytail: a browser that disconnects mid-answer loses the exchange — the
     # generator is closed and `_save_exchange` never runs. Accepted: the user saw
-    # a partial answer they did not keep. Wrap the loop in try/finally if it ever
-    # matters.
+    # a partial answer they did not keep. The `finally` above now closes the
+    # *trace* on that path, but deliberately does not save; moving the save into
+    # it changes what a conversation contains and is a Day 10b decision.
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
