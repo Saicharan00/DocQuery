@@ -19,7 +19,7 @@ import codecs
 import io
 import logging
 import math
-from collections import Counter
+from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -68,6 +68,12 @@ REPEAT_MIN_PAGES = 3
 # spot on every page, and the repeat rule would otherwise delete the entire
 # document. No logo is half a page.
 REPEAT_EXEMPT_AREA_FRACTION = 0.5
+# ...or unless the picture actually changes. How many pages of a repeated
+# position to render before believing it is furniture. A logo is byte-identical
+# everywhere, so two samples already settle it; a slide deck's charts differ on
+# the first comparison. Sampling instead of rendering the lot keeps a 200-page
+# report with a logo at three renders rather than two hundred.
+REPEAT_SAMPLE_PAGES = 3
 # Spend brake: each image is a billed embedding and a Storage object. Raised
 # from 50 after a real 85-page project report came in at 69 figures — the cap
 # was cutting its results section, which is the half worth retrieving.
@@ -369,6 +375,33 @@ def _position_key(box: pymupdf.Rect) -> tuple[int, int, int, int]:
     return tuple(round(value / tolerance) for value in (box.x0, box.y0, box.x1, box.y1))
 
 
+def _renders_identically(document, group: list[tuple[int, pymupdf.Rect]]) -> bool:
+    """True when every sampled copy of this box is the same picture.
+
+    The one thing that separates a logo from a slide deck's charts: both repeat
+    in the same spot on many pages, but only the logo repeats the same *content*.
+    Position alone used to decide this, which silently deleted every chart in a
+    deck of slides — one chart per slide, all in the same placeholder.
+
+    Stops at the first difference, so the expensive case (a real figure) is also
+    the cheap one.
+    """
+    first = None
+    for page_number, box in group[:REPEAT_SAMPLE_PAGES]:
+        rendered = _render(document[page_number - 1], box)
+        if first is None:
+            first = rendered
+        elif rendered != first:
+            return False
+    return True
+
+
+# In plain English: draw the same rectangle from the first few pages it turns up
+# on and see whether the pictures come out identical. A company logo does. A
+# different chart on every slide does not — and that is the whole difference
+# between something worth deleting and something worth keeping.
+
+
 def _render(page, box: pymupdf.Rect) -> bytes:
     """Screenshot this rectangle of this page as a JPEG.
 
@@ -433,21 +466,47 @@ def find_images(
         # below cuts the tail of the document rather than an arbitrary set.
         kept.sort(key=lambda item: (item[0], round(item[1].y0, 2), round(item[1].x0, 2)))
 
-        # Page furniture: the same box in the same spot on many pages. A logo on
-        # 40 pages would otherwise be embedded 40 times and compete with real
-        # figures in every search — junk in the index is worse than junk on the
-        # page. Big boxes are exempt because a scanned document is one full-page
-        # image per page in the identical spot, and this rule would otherwise
-        # delete the entire document.
-        appearances = Counter(_position_key(box) for _, box, _ in kept)
+        # Page furniture: the same box, holding the same picture, on many pages.
+        # A logo on 40 pages would otherwise be embedded 40 times and compete
+        # with real figures in every search — junk in the index is worse than
+        # junk on the page.
+        #
+        # Two escape hatches, because "same spot on many pages" describes real
+        # content just as well as it describes furniture:
+        #
+        # 1. Big boxes are exempt. A scanned document is one full-page image per
+        #    page in the identical spot, and this rule would delete all of it.
+        # 2. What survives that is dropped only if it renders to the identical
+        #    picture every time. A slide deck puts a *different* chart in the
+        #    same placeholder on every slide at roughly a third of the page —
+        #    too small for the first hatch — so position alone discarded the
+        #    entire deck and reported `images_total: 0` as a success.
+        by_position: dict[tuple[int, int, int, int], list[tuple[int, pymupdf.Rect, float]]] = (
+            defaultdict(list)
+        )
+        for item in kept:
+            by_position[_position_key(item[1])].append(item)
+
         threshold = max(REPEAT_MIN_PAGES, len(document) * REPEAT_PAGE_FRACTION)
+        furniture = {
+            key
+            for key, group in by_position.items()
+            if len(group) >= threshold
+            and all(fraction < REPEAT_EXEMPT_AREA_FRACTION for _, _, fraction in group)
+            and _renders_identically(document, [(number, box) for number, box, _ in group])
+        }
+
         survivors: list[tuple[int, pymupdf.Rect]] = []
 
-        for page_number, box, area_fraction in kept:
-            repeats = appearances[_position_key(box)]
-            if repeats >= threshold and area_fraction < REPEAT_EXEMPT_AREA_FRACTION:
+        for page_number, box, _ in kept:
+            key = _position_key(box)
+            if key in furniture:
                 if on_reject:
-                    on_reject(page_number, box, f"repeats on {repeats} pages")
+                    on_reject(
+                        page_number,
+                        box,
+                        f"furniture — same picture on {len(by_position[key])} pages",
+                    )
                 continue
             survivors.append((page_number, box))
 
@@ -612,5 +671,41 @@ if __name__ == "__main__":
     )
     assert find_images(sample_pdf, "text/plain") == [], "non-PDF should yield no images"
 
+    # A slide deck: six pages, one chart each, every one in the identical
+    # placeholder at about a third of the page. Same position on every page and
+    # too small for the big-box exemption, so the old position-only rule
+    # discarded all six and reported success with zero images. They differ in
+    # content, which is the whole point — that is what now saves them.
+    deck = pymupdf.open()
+    for page_index in range(6):
+        page = deck.new_page()
+        shade = 0.15 * page_index
+        page.draw_rect(
+            pymupdf.Rect(90, 200, 510, 600),
+            color=(0, 0, 0),
+            fill=(shade, 1 - shade, 0.5),
+        )
+
+    deck_pdf = deck.tobytes()
+    deck.close()
+
+    deck_images = find_images(deck_pdf, "application/pdf")
+
+    assert len(deck_images) == 6, (
+        "a slide deck's charts were filtered out as page furniture — they sit in "
+        f"the same spot on every slide but are different pictures (got {len(deck_images)})"
+    )
+
+    # And the reverse must still hold: identical content in the same spot is
+    # still furniture, or the logo case above regresses the moment this passes.
+    reasons: list[str] = []
+    find_images(sample_pdf, "application/pdf", on_reject=lambda _p, _b, r: reasons.append(r))
+    assert any("furniture" in reason for reason in reasons), (
+        "the repeated logo was no longer reported as furniture"
+    )
+
     sizes = ", ".join(f"{len(region.jpeg) // 1024}KB" for region in first_images)
-    print(f"OK — {len(first_images)} images, deterministic, all on page 1 ({sizes})")
+    print(
+        f"OK — {len(first_images)} images, deterministic, all on page 1 ({sizes}); "
+        f"deck kept {len(deck_images)}/6 charts; logo still filtered"
+    )
