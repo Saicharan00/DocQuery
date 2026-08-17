@@ -15,12 +15,19 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Iterator
 from uuid import UUID, uuid4
 
-from cohere.errors import TooManyRequestsError
+import httpx
+from cohere.errors import (
+    GatewayTimeoutError,
+    InternalServerError,
+    ServiceUnavailableError,
+    TooManyRequestsError,
+)
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
 from app.config import get_settings
@@ -363,6 +370,22 @@ def _items(data: bytes, mime_type: str | None) -> list[ingestion.Chunk]:
     """
     chunks = ingestion.chunk(ingestion.parse(data, mime_type))
 
+    # Counted rather than logged one line per box: `_items` re-parses the whole
+    # document on every step, so per-box logging would repeat the same hundred
+    # lines for every slice of a long ingest. One summary is enough to answer
+    # the only question worth asking here — "the figures are missing, did we
+    # throw them away?" — which previously had no answer anywhere at all,
+    # because nothing ever passed `on_reject`.
+    discarded: Counter[str] = Counter()
+    regions = ingestion.find_images(
+        data,
+        mime_type,
+        on_reject=lambda _page, _box, reason: discarded.update([reason]),
+    )
+
+    if discarded:
+        logger.info("Image filter discarded %s", dict(discarded))
+
     return chunks + [
         ingestion.Chunk(
             index=len(chunks) + offset,
@@ -373,7 +396,7 @@ def _items(data: bytes, mime_type: str | None) -> list[ingestion.Chunk]:
             token_count=0,
             image=region.jpeg,
         )
-        for offset, region in enumerate(ingestion.find_images(data, mime_type))
+        for offset, region in enumerate(regions)
     ]
 
 
@@ -403,6 +426,31 @@ def _batches(items: list[ingestion.Chunk]):
 
         yield items[start:end]
         start = end
+
+
+# A provider having a bad minute, not a bad file. Every one of these clears on
+# its own, and the next step resumes from the chunks already written — so none
+# of them should reach the generic handler at the bottom of `ingest_step`, which
+# marks the document `failed` and tells the user to re-upload it. Re-uploading
+# throws the resume point away and re-pays for every chunk already embedded, so
+# the advice is not just unhelpful, it is expensive.
+#
+# `httpx.TransportError` is the base class for every connect, read, write and
+# pool timeout, so one entry covers the whole family. Deliberately does not
+# include `BadRequestError` or `UnprocessableEntityError`: those mean we sent
+# something wrong, and retrying sends the identical thing again.
+TRANSIENT_ERRORS = (
+    TooManyRequestsError,
+    InternalServerError,
+    ServiceUnavailableError,
+    GatewayTimeoutError,
+    httpx.TransportError,
+)
+
+# In plain English: a list of the ways a service we depend on can be
+# temporarily broken, as opposed to the ways the user's file can be broken.
+# The difference matters because one of them is worth waiting out and the
+# other is not.
 
 
 def _token_expired(exc: Exception) -> bool:
@@ -552,14 +600,20 @@ def ingest_step(
                     if is_image
                     else ingestion.embed([item.content for item in batch])
                 )
-            except TooManyRequestsError:
-                # Not a failure — the embedding provider is saying "slower".
-                # End the step with whatever is already written and let the
-                # browser come back. Treating this as fatal would mark a
-                # perfectly good document `failed` for a condition that clears
-                # itself in under a minute.
+            except TRANSIENT_ERRORS as exc:
+                # Not a failure — the embedding provider is saying "slower", or
+                # is briefly down. End the step with whatever is already written
+                # and let the browser come back. Treating this as fatal would
+                # mark a perfectly good document `failed` for a condition that
+                # clears itself in under a minute.
+                #
+                # Returning normally (rather than raising) is what makes this
+                # recover with nobody watching: the step reports the same
+                # `chunks_done` as last time, the browser reads that as no
+                # progress, waits, and calls again.
                 logger.warning(
-                    "Rate limited by the embedding provider at chunk %s of %s",
+                    "Embedding provider unavailable (%s) at chunk %s of %s",
+                    type(exc).__name__,
                     written,
                     total,
                 )
@@ -659,6 +713,30 @@ def ingest_step(
         )
 
     except Exception as exc:
+        # The download, the image uploads and the chunk insert all sit outside
+        # the embedding loop's own guard above, so a provider blip on any of
+        # them arrives here instead. The row must stay `processing`: the chunks
+        # already written are still good, the resume point is still valid, and
+        # Retry replays only what is left. Falling through to `failed` below is
+        # what used to send somebody back to re-upload a perfectly fine file.
+        #
+        # `warning`, not `exception` — nothing here is a defect to go and read a
+        # traceback about.
+        if isinstance(exc, TRANSIENT_ERRORS):
+            logger.warning(
+                "Transient failure (%s) on document %s; leaving it resumable",
+                type(exc).__name__,
+                document_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "A service we depend on is briefly unavailable. Your "
+                    "progress is saved — press Retry to pick up where this "
+                    "left off."
+                ),
+            ) from exc
+
         # The message is stored on the row and shown to the user, so it has to
         # say something real — "Nothing could be read from this file…" above, for
         # instance. Chunks already written stay: a retry resumes from them.
@@ -880,3 +958,48 @@ async def delete_document(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="The file was removed but the record could not be. Please try again.",
         ) from exc
+
+
+if __name__ == "__main__":
+    # Imported here rather than at the top: these two are named only to prove
+    # they are *excluded*, and nothing in the running app needs them.
+    from cohere.errors import BadRequestError, UnprocessableEntityError
+
+    # What must be transient: a provider having a bad minute. Getting this tuple
+    # wrong is silent and expensive in both directions, which is why it is worth
+    # a check at all. Drop a class from it and a Cohere blip goes back to marking
+    # a good document `failed` and telling the reader to re-upload — throwing the
+    # resume point away and re-paying for every chunk already embedded. Add too
+    # much to it and a genuinely broken file stays `processing` forever, retrying
+    # a parse that can never succeed.
+    for transient in (
+        TooManyRequestsError(body="slow down"),
+        InternalServerError(body="upstream fell over"),
+        ServiceUnavailableError(body="maintenance"),
+        GatewayTimeoutError(body="took too long"),
+        httpx.ReadTimeout("read timed out"),
+        httpx.ConnectError("could not connect"),
+        httpx.PoolTimeout("no free connection"),
+    ):
+        assert isinstance(transient, TRANSIENT_ERRORS), (
+            f"{type(transient).__name__} must be treated as transient — as it is, "
+            "a provider blip marks the user's file failed and tells them to re-upload"
+        )
+
+    # ...and what must not be. These mean the file or the request is wrong, and
+    # retrying sends the identical thing again.
+    for fatal in (
+        ValueError("Nothing could be read from this file."),
+        BadRequestError(body="malformed request"),
+        UnprocessableEntityError(body="bad input"),
+        RuntimeError("a real defect"),
+    ):
+        assert not isinstance(fatal, TRANSIENT_ERRORS), (
+            f"{type(fatal).__name__} must not be retried forever — it will never succeed"
+        )
+
+    # The rate limit specifically: it was the only member before this change, and
+    # it is the one that keeps a long ingest resumable rather than failed.
+    assert issubclass(TooManyRequestsError, TRANSIENT_ERRORS), "rate limiting regressed to fatal"
+
+    print(f"OK - {len(TRANSIENT_ERRORS)} transient error classes, fatal ones excluded")

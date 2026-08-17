@@ -515,8 +515,13 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 - [x] Every chat message produces a visible LangSmith trace with the full pipeline breakdown.
       *(Verified locally 2026-08-14: one trace, 7 spans, 0 detached. Railway still to confirm.)*
-- [ ] One trace is public — URL saved.
-- [ ] Every error path shows the user something meaningful. *(10b)*
+- [ ] One trace is public — URL saved. *(Needs a click in the LangSmith UI — the
+      SDK cannot share a run. Blocked on nothing else.)*
+- [x] Every error path shows the user something meaningful. *(10b, 2026-08-17.)*
+      *Step 8 re-verified on this branch: zero `console.error`/`console.log` in
+      `apps/web/src`, and every `print(` in `apps/api/app` is a self-check "OK"
+      line inside a `__main__` block. Reasoned about statically, not clicked
+      through in a browser.*
 
 ### Day 10a — what it proved, and what it did not
 
