@@ -229,38 +229,66 @@ def _session_id() -> str | None:
     # forever.
 
 
-def record_feedback(run_id: str, score: int | None, comment: str | None) -> bool:
+def record_feedback(run_id: str, score: int | None, comment: str | None) -> list[str]:
     """Attach a reader's verdict to the trace of the answer they read.
 
-    Returns whether it was recorded. `False` means "not stored" — either tracing
-    is off, so there is no trace to hang it on, or the call failed. Both are
-    logged rather than raised: the caller decides what to tell the user, and this
-    module's rule is that nothing in it may break a request.
+    Returns the names of the parts that were **not** recorded; an empty list
+    means everything asked for landed. Failures are logged rather than raised:
+    the caller decides what to tell the user, and this module's rule is that
+    nothing in it may break a request.
 
     The thumb and the sentence go in under **different keys**. `key` is what
     groups feedback into a column in the LangSmith UI, so a single key holding
     both would mean the score column gained a second, score-less row every time
     somebody explained themselves. Two keys keeps "how are the answers doing"
     answerable by averaging one column, with the comments beside it.
+
+    They also get a `try` each, and that is the point of returning a list rather
+    than a bool. Sharing one `try` meant a comment failing *after* a score had
+    already been filed reported total failure — the reader was told nothing was
+    saved while their rating was already in, and doing as they were told and
+    retrying counted that rating twice. Two keys exist precisely to keep one
+    reader's opinion out of the average twice; one shared `try` handed it back.
     """
     if not tracing_is_enabled():
-        return False
+        # No trace to hang anything on, so nothing asked for was stored. The
+        # guards mirror the two below exactly: a thumbs-down is `score == 0`,
+        # which is falsy, so it has to be tested against `None` and not for
+        # truth — otherwise the one rating people give when they are unhappy is
+        # the one that silently reports itself as never having been asked for.
+        requested = ["rating"] if score is not None else []
+        if comment:
+            requested.append("note")
+        return requested
 
     session = _session_id()
+    failed: list[str] = []
 
-    try:
-        if score is not None:
+    if score is not None:
+        try:
             _client().create_feedback(
                 run_id, key="user_rating", score=score, session_id=session
             )
-        if comment:
+        except Exception:
+            logger.exception("Could not record the rating for run %s", run_id)
+            failed.append("rating")
+
+    if comment:
+        try:
             _client().create_feedback(
                 run_id, key="user_comment", comment=comment, session_id=session
             )
-        return True
-    except Exception:
-        logger.exception("Could not record feedback for run %s", run_id)
-        return False
+        except Exception:
+            logger.exception("Could not record the note for run %s", run_id)
+            failed.append("note")
+
+    return failed
+
+    # In plain English: file the star rating and the written note as two separate
+    # errands, and report back exactly which ones didn't get done. Before this
+    # they were one errand, so if the second half went wrong the caller was told
+    # the whole thing had — and the reader, believing it, sent their rating in a
+    # second time.
 
 
 def anon(user_id: str) -> str:
@@ -401,4 +429,49 @@ if __name__ == "__main__":
     assert _session_id() is None
     assert _calls["n"] == 2, "a failed lookup must not be cached"
 
-    print(f"OK - redaction, arg filtering, None-safety. tracing on: {tracing_is_enabled()}")
+    # A rating that files and a note that does not must be reported as exactly
+    # that. Reporting the pair as a total failure is what sent a reader back to
+    # resubmit a rating already in the average — the double-count the two-key
+    # split exists to prevent.
+    _filed: list[str] = []
+
+    class _HalfBrokenClient:
+        def create_feedback(self, run_id, key, score=None, comment=None, session_id=None):
+            if key == "user_comment":
+                raise RuntimeError("simulated LangSmith failure")
+            _filed.append(key)
+
+    def _enabled():
+        return True
+
+    def _half_broken():
+        return _HalfBrokenClient()
+
+    def _fake_session():
+        return "session-1"
+
+    tracing_is_enabled = _enabled
+    _client = _half_broken
+    _session_id = _fake_session
+
+    assert record_feedback("run-1", score=1, comment="too vague") == ["note"], (
+        "a failed note must be reported on its own, not as total failure"
+    )
+    assert _filed == ["user_rating"], "the rating should still have been filed"
+
+    # Rating alone, on the same half-broken client: nothing failed, so nothing
+    # is reported — this is the path the real UI takes.
+    _filed.clear()
+    assert record_feedback("run-2", score=0, comment=None) == []
+    assert _filed == ["user_rating"], "a thumbs-down is score 0 and must still file"
+
+    # Tracing off: everything asked for is unrecorded, and a thumbs-down still
+    # counts as having been asked for despite being falsy.
+    def _disabled():
+        return False
+
+    tracing_is_enabled = _disabled
+    assert record_feedback("run-3", score=0, comment="x") == ["rating", "note"]
+    assert record_feedback("run-4", score=None, comment=None) == []
+
+    print(f"OK - redaction, arg filtering, None-safety, feedback split. tracing on: {_enabled()}")

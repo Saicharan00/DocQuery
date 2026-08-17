@@ -68,7 +68,9 @@ def submit_feedback(
     # messages, so finding no row means the run is either someone else's or made
     # up — and both get the same reply, which tells a prober nothing.
 
-    if tracing.record_feedback(str(request.run_id), request.score, request.comment):
+    failed = tracing.record_feedback(str(request.run_id), request.score, request.comment)
+
+    if not failed:
         return
 
     # Reached two ways: tracing is switched off, or the upload failed. The first
@@ -76,9 +78,19 @@ def submit_feedback(
     # run id and the buttons never render — so treat both as a failure the reader
     # deserves to know about. They clicked something and it did not happen;
     # silently swallowing that is how a feedback box becomes decorative.
+    #
+    # Naming the parts matters when only some of them landed. "Please try again"
+    # against a half-stored submission is advice that corrupts the data it is
+    # trying to save: the rating is already filed, and following the advice files
+    # it a second time. Our own UI cannot reach that case — it posts the thumb
+    # and the note as two separate requests — but the endpoint accepts both in
+    # one body, so anything calling it directly can.
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Could not record your feedback. Please try again.",
+        detail=(
+            f"Your {' and '.join(failed)} could not be recorded. "
+            "Please try again — anything not named here was saved."
+        ),
     )
 
 
