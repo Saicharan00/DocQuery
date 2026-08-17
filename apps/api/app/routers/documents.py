@@ -13,13 +13,15 @@ write order in each handler below exists to keep them from disagreeing.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
+from typing import Annotated, Iterator
 from uuid import UUID, uuid4
 
 from cohere.errors import TooManyRequestsError
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
 from app.config import get_settings
 from app.deps import CurrentUser, SupabaseClient, TokenExpiry
@@ -53,6 +55,69 @@ STEP_BUDGET_SECONDS = 45
 # credential expires rather than exactly as it does. Covers the last database
 # write, the status update, and any clock difference between us and Supabase.
 TOKEN_SAFETY_MARGIN_SECONDS = 5
+
+
+# Which documents currently have a step running. `ingest_step` had a `ready`
+# check but nothing stopping two of them overlapping, and two steps read the
+# same resume point, **both pay Cohere for the identical batch**, and then one
+# insert wins while the other violates `chunks_document_chunk_idx` and lands in
+# the generic handler — marking a perfectly good document `failed`. On the worse
+# ordering the loser overwrites `ready` with `failed` on a document that had
+# just finished.
+#
+# Two tabs trigger it, and so does leaving the dashboard and coming back, since
+# the browser-side guard is a per-mount ref.
+#
+# A `threading.Lock`, not an `asyncio` one: `ingest_step` is deliberately a sync
+# `def`, so FastAPI runs it in a worker thread and there is no event loop here
+# to await on.
+#
+# ponytail: process-local. Two Railway instances would each keep their own set
+# and neither would see the other's claim. Upgrade path when a second instance
+# exists: a `lease_expires_at` column on `documents`, claimed with a conditional
+# UPDATE — the same idea, moved into the one place both processes share.
+_steps_in_flight: set[str] = set()
+_in_flight_lock = threading.Lock()
+
+
+def claim_ingest_step(_user_id: CurrentUser, document_id: UUID) -> Iterator[None]:
+    """Take the only ticket to ingest this document, or refuse the request.
+
+    A dependency rather than a block inside the handler, for one reason that
+    matters: this way the claim is held across the *whole* request, including
+    the `status == "ready"` check near the top. A guard that started lower down
+    would let a second caller read `processing`, wait, and then set a finished
+    document back to `processing` — the exact overwrite this is here to stop.
+
+    Depends on `CurrentUser` so an unauthenticated request is rejected before it
+    can touch the set at all.
+    """
+    key = str(document_id)
+
+    with _in_flight_lock:
+        if key in _steps_in_flight:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This document is already being processed.",
+            )
+        _steps_in_flight.add(key)
+
+    try:
+        yield
+    finally:
+        # Runs whatever happened — a finished step, a 502, a client that hung
+        # up. A claim that outlived its request would wedge the document for the
+        # lifetime of the process, which is worse than the bug being fixed.
+        with _in_flight_lock:
+            _steps_in_flight.discard(key)
+
+
+# In plain English: keep a list of the documents currently being worked on. When
+# a request arrives, look at the list — if this document is already on it, tell
+# the caller "someone else is doing this one" and stop. Otherwise add it, do the
+# work, and take it off again at the end no matter how the request ended. That
+# is what stops two browser tabs paying twice to embed the very same pages and
+# then tripping over each other's writes.
 
 
 @router.get("", response_model=list[DocumentOut])
@@ -368,6 +433,7 @@ def ingest_step(
     supabase: SupabaseClient,
     expires_at: TokenExpiry,
     document_id: UUID,
+    _claim: Annotated[None, Depends(claim_ingest_step)] = None,
 ) -> IngestStepOut:
     """Do one slice of ingestion, then hand control back to the browser.
 
@@ -381,6 +447,11 @@ def ingest_step(
     document sits at `processing` with its finished chunks saved, and the next
     call resumes from there. And re-calling this on a `failed` document retries
     it, keeping whatever it managed to write the first time.
+
+    Only one step per document runs at a time — `claim_ingest_step` holds the
+    ticket for the whole request and answers a second caller with a 409. Nothing
+    below is safe to run twice at once: two steps would read the same resume
+    point and both pay to embed the identical batch.
     """
     # Started here rather than at the embedding loop so the budget covers the
     # whole request — the download and parse happen on the same token's clock.
@@ -574,18 +645,44 @@ def ingest_step(
             status="ready" if done else "processing",
             # `written` counts chunks, so the last one stored is at index
             # `written - 1`. Guarded because a rate limit can end a step before
-            # anything was written at all.
-            page=chunks[written - 1].page_number if written else 0,
+            # anything was written at all. Also clamped to `total` (chunks
+            # recomputed fresh this step): `written` can start from a resume
+            # point saved in the database on a previous step, and if a parser
+            # or config change makes this parse yield fewer chunks than before,
+            # that saved number can point past the end of the new list.
+            # In plain English: don't trust an old "how far we got" number more
+            # than the list we actually have in hand right now — clamp it down
+            # to fit before using it as an index.
+            page=chunks[min(written, total) - 1].page_number if written else 0,
             pages=max((item.page_number for item in chunks), default=0),
             images_total=images_total,
         )
 
     except Exception as exc:
         # The message is stored on the row and shown to the user, so it has to
-        # say something real — "No readable text found…" from `parse`, for
+        # say something real — "Nothing could be read from this file…" above, for
         # instance. Chunks already written stay: a retry resumes from them.
         logger.exception("Ingestion step failed for document %s", document_id)
-        message = str(exc) or exc.__class__.__name__
+
+        # `ValueError` is this codebase talking: `ingestion.parse` on a type it
+        # cannot read, `_parse_txt` on an encoding it cannot recover, and the
+        # empty-file check above. Those sentences were written to be read by the
+        # person who uploaded the file.
+        #
+        # Everything else is a library or a provider talking, and its text is
+        # written for whoever is reading the log — pymupdf's "cannot find
+        # startxref", a storage client quoting the request it just made. That
+        # used to go straight to `str(exc)`, onto the screen, and into the
+        # `documents.error` column that `document-list.tsx:207` renders
+        # verbatim. What lands in a column the user reads is a decision, not
+        # whatever the nearest dependency happened to phrase.
+        if isinstance(exc, ValueError):
+            message = str(exc) or "This file could not be read."
+        else:
+            message = (
+                "Something went wrong while reading this file. "
+                "Please try again, or re-upload it."
+            )
         try:
             _set_status(supabase, document_id, "failed", message[:500])
         except Exception:

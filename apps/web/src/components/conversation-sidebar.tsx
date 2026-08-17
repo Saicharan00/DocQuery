@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { AuthNotReadyError, useApi } from "@/lib/api";
+import { AUTH_WAIT_MS, AuthNotReadyError, useApi } from "@/lib/api";
 import type { Conversation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -71,27 +71,74 @@ export function ConversationSidebar() {
     ? pathname.slice(CHAT_PATH.length + 1)
     : null;
 
+  // Resolves to whether this attempt reached a conclusion. Only the
+  // auth-not-ready path answers `false`, and only because that one is expected
+  // to be retried automatically — the caller cannot tell the difference
+  // otherwise, since that error is deliberately swallowed.
   const refresh = useCallback(() => {
     return api<Conversation[]>("/conversations")
       .then((rows) => {
         setConversations(rows);
         setError(null);
+        return true;
       })
       .catch((e: Error) => {
         // Clerk not ready yet. `api` changes identity when it is, which re-runs
         // the effect below — showing an auth error on first paint would be a
         // lie that fixes itself a moment later.
-        if (e instanceof AuthNotReadyError) return;
+        if (e instanceof AuthNotReadyError) return false;
         setError(e.message);
+        return true;
       });
   }, [api]);
 
+  // Holds the ceiling timer's id across renders and across the two effects
+  // below, so the refetch effect can clear the *same* timer the mount effect
+  // started. A ref, not state: nothing on screen depends on this id, and
+  // changing it must not itself trigger a render.
+  const giveUpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+
+    // The ceiling on the auth wait, started once — on mount, not on every
+    // `pathname` change. It used to live in the same effect as the refetch
+    // below, keyed on `[refresh, pathname]`, so clicking between
+    // conversations (which changes the URL, including via ChatView's
+    // `history.replaceState`) cleared and restarted it on every click. In the
+    // one scenario it exists for — Clerk never becoming ready — someone
+    // clicking around would keep pushing the ceiling back forever and it
+    // might never fire. `conversations` staying null is what renders
+    // "Loading…", and on the auth path nothing else ever sets it, so without
+    // this the sidebar would wait for a token that may never come, for as
+    // long as the tab is open. Falling back to an empty list rather than a
+    // spinner means the New chat button is still reachable.
+    giveUpRef.current = setTimeout(() => {
+      if (cancelled) return;
+      setConversations((current) => current ?? []);
+      setError("Could not load your conversations. Refresh the page to retry.");
+    }, AUTH_WAIT_MS);
+
+    return () => {
+      cancelled = true;
+      if (giveUpRef.current) clearTimeout(giveUpRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    void refresh().then((settled) => {
+      if (settled && giveUpRef.current) {
+        clearTimeout(giveUpRef.current);
+        giveUpRef.current = null;
+      }
+    });
   }, [refresh, pathname]);
 
-  // `pathname` is in the dependency list without being used inside — that is
-  // deliberate, and it is the refetch trigger described above.
+  // `pathname` is in this second effect's dependency list without being used
+  // inside its body — that is deliberate, and it is the refetch trigger
+  // described above. It stays separate from the ceiling timer above so a
+  // fast-clicking reader retriggers the refetch without ever touching the
+  // timer meant to survive exactly that.
 
   // Which row is currently a text box instead of a link. One at a time, so a
   // single id is enough state to describe it.

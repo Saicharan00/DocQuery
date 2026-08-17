@@ -22,6 +22,124 @@ export class AuthNotReadyError extends Error {
 }
 
 /**
+ * How long to keep waiting quietly on `AuthNotReadyError` before giving up.
+ *
+ * Ignoring that error is right, but it assumes Clerk always becomes ready in a
+ * moment. When it does not — a dead session, an outage, a blocked request —
+ * nothing else ever clears the waiting state, and the screen says "Loading…"
+ * until the tab is closed. This is the ceiling on the otherwise-correct wait:
+ * long enough that no ordinary sign-in ever reaches it, short enough that a
+ * broken one does not look like a hung page.
+ *
+ * Lives here rather than in each component so the two places that wait on auth
+ * cannot drift apart.
+ */
+export const AUTH_WAIT_MS = 10_000;
+
+/**
+ * Raised when the session is genuinely over — not merely stale.
+ *
+ * The opposite end of `AuthNotReadyError`: that one resolves itself and must be
+ * hidden, this one never resolves itself and must be shown. Thrown only after a
+ * forced token refresh has already been tried and refused, so by the time a
+ * caller sees it there is nothing left to do automatically.
+ */
+export class SessionExpiredError extends Error {
+  constructor(
+    message = "Your session has expired. Refresh the page to sign in again.",
+  ) {
+    super(message);
+    this.name = "SessionExpiredError";
+  }
+}
+
+/**
+ * Raised on a 409: somebody else is already doing this exact work.
+ *
+ * A distinct class because the status is otherwise lost — `useApi` collapses
+ * every failure into a plain `Error` carrying only the server's `detail`, and
+ * the ingest loop has to tell "this document is already being processed by
+ * another tab" (wait, then carry on) apart from a real failure (stop, and offer
+ * a Retry button). Matching on the message text instead would break the first
+ * time somebody rewords it.
+ */
+export class ConflictError extends Error {
+  constructor(message = "That work is already in progress.") {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+/**
+ * `fetch` with the bearer token attached, and one forced retry on a 401.
+ *
+ * Clerk hands out a cached token and only refreshes it near expiry, so a 401 is
+ * usually a token that went stale in this tab rather than a session that ended
+ * — a laptop reopened after lunch reaches this line every time. Asking Clerk
+ * again with `skipCache` costs one round trip and fixes that case with nothing
+ * on screen. A second 401 means the session really is gone.
+ *
+ * Shared because `useAuthedFetch` and `useChatStream` differ only in what they
+ * do with the body. Written once in each, the 401 branch was missing from both
+ * — and putting it here means the retry covers JSON, images and the stream
+ * rather than whichever one someone remembered.
+ */
+type TokenGetter = (options?: { skipCache?: boolean }) => Promise<string | null>;
+
+async function fetchWithToken(
+  getToken: TokenGetter,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const send = (token: string) =>
+    fetch(url, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
+    });
+
+  const token = await getToken();
+  if (!token) {
+    // Never interpolate a null token into the header. `Bearer ${null}` becomes
+    // the literal string "Bearer null", which the backend can only report as a
+    // malformed token — indistinguishable from a real failure.
+    //
+    // `SessionExpiredError`, not `AuthNotReadyError`, and that used to be the
+    // wrong way round. Every caller of this function has already checked
+    // `isLoaded`, so Clerk is loaded by the time we get here and a null token
+    // means there is no session — which does *not* fix itself. Calling it
+    // "not ready" made every caller swallow it as a condition that resolves in
+    // a moment, so the screen simply stayed empty forever. The identical null
+    // twenty lines below was already classified this way; the file used to
+    // contradict itself.
+    throw new SessionExpiredError();
+  }
+
+  const res = await send(token);
+  if (res.status !== 401) {
+    return res;
+  }
+
+  const fresh = await getToken({ skipCache: true });
+  if (!fresh) {
+    throw new SessionExpiredError();
+  }
+
+  const retried = await send(fresh);
+  if (retried.status === 401) {
+    throw new SessionExpiredError();
+  }
+
+  return retried;
+}
+
+// In plain English: attach the token and send the request. Anything other than
+// a 401 comes straight back, untouched — this function has no opinion about
+// ordinary errors. A 401 is the one status it acts on: ask Clerk for a brand
+// new token, skipping the cached one that just failed, and send the identical
+// request a second time. If that is refused too, stop retrying and raise the
+// error the user can actually act on.
+
+/**
  * One authenticated request, handed back as the raw `Response`.
  *
  * Split out of `useApi` because not everything this app fetches is JSON. A
@@ -49,26 +167,18 @@ export function useAuthedFetch() {
         throw new AuthNotReadyError();
       }
 
-      const token = await getToken();
-      if (!token) {
-        // Never interpolate a null token into the header. `Bearer ${null}`
-        // becomes the literal string "Bearer null", which the backend can only
-        // report as a malformed token — indistinguishable from a real failure.
-        throw new AuthNotReadyError("No active session.");
-      }
-
-      const res = await fetch(`${API_URL}${path}`, {
-        ...init,
-        headers: {
-          // Deliberately no Content-Type default: when the body is FormData the
-          // browser has to set it itself, including the multipart boundary.
-          ...init?.headers,
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      // Deliberately no Content-Type default: when the body is FormData the
+      // browser has to set it itself, including the multipart boundary.
+      const res = await fetchWithToken(getToken, `${API_URL}${path}`, init ?? {});
 
       if (!res.ok) {
-        throw new Error(await readErrorMessage(res));
+        const message = await readErrorMessage(res);
+        // Read the status before it is thrown away. Only 409 needs telling
+        // apart today; everything else is a failure the caller shows verbatim.
+        if (res.status === 409) {
+          throw new ConflictError(message);
+        }
+        throw new Error(message);
       }
 
       return res;
@@ -135,20 +245,12 @@ export function useChatStream() {
         throw new AuthNotReadyError();
       }
 
-      const token = await getToken();
-      if (!token) {
-        throw new AuthNotReadyError("No active session.");
-      }
-
-      const res = await fetch(`${API_URL}/chat`, {
+      const res = await fetchWithToken(getToken, `${API_URL}/chat`, {
         method: "POST",
         // Lets the caller cancel: closing the page, or hitting "New chat"
         // mid-answer, aborts the request instead of leaving it running.
         signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
@@ -214,28 +316,46 @@ export function useChatStream() {
       // it throws — which is what turns an invisible dead connection into a
       // visible error message.
 
-      while (true) {
-        const { done, value } = await readOrStall();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await readOrStall();
+          if (done) break;
 
-        // `{ stream: true }` is not optional here. A multi-byte character — é,
-        // an em dash, an emoji — can be split across two network chunks, and
-        // without this the decoder would turn each half into a "�".
-        buffer += decoder.decode(value, { stream: true });
+          // `{ stream: true }` is not optional here. A multi-byte character — é,
+          // an em dash, an emoji — can be split across two network chunks, and
+          // without this the decoder would turn each half into a "�".
+          buffer += decoder.decode(value, { stream: true });
 
-        let split: number;
-        while ((split = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
+          let split: number;
+          while ((split = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, split);
+            buffer = buffer.slice(split + 2);
 
-          const event = parseEvent(block);
-          if (!event) continue;
+            const event = parseEvent(block);
+            if (!event) continue;
 
-          if (event.event === "done" || event.event === "error") {
-            signedOff = true;
+            if (event.event === "done" || event.event === "error") {
+              signedOff = true;
+            }
+            yield event;
           }
-          yield event;
         }
+      } finally {
+        // Without this the reader was simply abandoned. Two live paths throw
+        // straight out of this generator — the 20s stall timer and a corrupted
+        // stream — and a third leaves through `return` when the caller stops
+        // iterating. All three left the reader locked and the response body
+        // open, which per chat.py's own note means the server generator stays
+        // suspended and the model stream stays open *and billable* until
+        // garbage collection happens to notice. The mechanism added to turn an
+        // invisible dead connection into a visible error was itself leaving the
+        // connection running.
+        //
+        // `cancel()` rather than `releaseLock()`: releasing hands back the lock
+        // but leaves the body streaming. Cancelling closes it, which is what
+        // actually reaches the server. It rejects if the stream is already
+        // errored, and there is nothing useful to do about that here.
+        await reader.cancel().catch(() => {});
       }
 
       // `reader.read()` reports `done: true` both for a body that ended
@@ -285,7 +405,18 @@ function parseEvent(block: string): ChatEvent | null {
 
   if (!name || !data) return null;
 
-  return { event: name, data: JSON.parse(data) } as ChatEvent;
+  try {
+    return { event: name, data: JSON.parse(data) } as ChatEvent;
+  } catch {
+    // Still a throw — skipping the block would drop part of an answer and let
+    // the rest look complete, which is the one outcome worse than an error.
+    // Only the wording changes. `JSON.parse` raises "Unexpected token < in JSON
+    // at position 0", and that `<` is the first character of `<!DOCTYPE html>`:
+    // a proxy or platform error page arriving where an event should be. The
+    // user can act on "try again"; they can do nothing with a parser's opinion
+    // about angle brackets.
+    throw new Error("The answer stream was corrupted. Please try again.");
+  }
 }
 
 /** Pull FastAPI's `detail` out of an error response so the UI can show it. */

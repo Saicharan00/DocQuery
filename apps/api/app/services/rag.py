@@ -57,6 +57,42 @@ RETRIEVE_K = 5
 # that decides to enumerate a whole document bills the full output window.
 MAX_ANSWER_TOKENS = 1000
 
+# Wall-clock ceilings on a provider call, in seconds. Passing no timeout does
+# not mean "fast" — it means inheriting `litellm.request_timeout`, which is
+# 6000.0, i.e. a hundred minutes (checked, not assumed, 2026-08-13). A
+# provider that accepts the connection and then goes quiet is the case these
+# bound; until now the only thing that noticed was the browser's idle guard,
+# 20s after the last token, which cannot help the two helpers at all because
+# neither is streamed and so neither has a last token to count from.
+#
+# Two numbers rather than three: `rewrite_query` and `generate_title` are the
+# same shape of call — one short sentence from DEFAULT_MODEL, with a caller
+# already holding a fallback — so both would rather give up early than make the
+# user wait for something optional. The answer itself has no fallback and is the
+# thing the user is actually waiting for, so it gets the patient number.
+#
+# ponytail: this bounds a provider that never responds or stalls between chunks,
+# not the total length of a healthy stream. A model that keeps steadily emitting
+# is bounded by MAX_ANSWER_TOKENS instead. Add a total-duration cap only if a
+# real answer ever legitimately runs that long.
+HELPER_TIMEOUT = 10
+ANSWER_TIMEOUT = 60
+
+# Ceiling on the pictures inlined into one question, counted in raw JPEG bytes
+# before base64 (which adds a further third on top).
+#
+# There was no ceiling of any kind here until 2026-08-14. The count was bounded
+# only incidentally, by `RETRIEVE_K` — nothing bounded the *size*, so a question
+# landing on five full-page figures put several megabytes into a single request.
+# That is slow, it is billed, and past a provider's own request limit it is
+# simply refused, which turns a good answer into no answer at all.
+#
+# 4 MB because a page-region JPEG out of PyMuPDF runs 100-500 KB, so five of
+# them come to roughly 2.5 MB: the normal case never reaches this line, and what
+# it catches is the outlier. A brake, not a quality setting — same role as
+# MAX_ANSWER_TOKENS above.
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
+
 # Enough of a chunk to recognise it in a citation, not enough to bloat the
 # `messages.sources` JSON that Day 8 renders on every message.
 PREVIEW_CHARS = 300
@@ -204,8 +240,18 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
     chunks retrieved alongside it are still worth sending. The model is told
     which sources are images, so a missing one degrades to a source it can see
     the description of but not the content, which is honest.
+
+    A figure that does not fit in `MAX_IMAGE_BYTES` is skipped the same way, and
+    for the same reason: the alternative is a request the provider refuses
+    outright, which costs every figure and the answer with them.
+
+    The cap lives here rather than in `build_messages` because this is where the
+    bytes are paid for. `build_messages` renders whatever mapping it is handed,
+    so a limit applied there would drop images we had already downloaded.
     """
     images: dict[str, str] = {}
+    remaining = MAX_IMAGE_BYTES
+    skipped = 0
 
     for chunk in chunks:
         path = chunk.get("image_path")
@@ -232,7 +278,25 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
             )
             continue
 
+        if len(jpeg) > remaining:
+            # `continue`, not `break`: the budget is spent on whatever fits, so
+            # one oversized figure does not starve the smaller ones behind it.
+            # Nothing is wasted by carrying on — `RETRIEVE_K` already bounds how
+            # many downloads this loop can attempt.
+            skipped += 1
+            continue
+
+        remaining -= len(jpeg)
         images[path] = f"data:image/jpeg;base64,{base64.b64encode(jpeg).decode()}"
+
+    if skipped:
+        # Worth a line in the log, because from the outside this is invisible:
+        # the answer arrives looking entirely normal, just built from fewer
+        # figures than were retrieved.
+        logger.warning(
+            "Skipped %d image(s) that did not fit this answer's image budget",
+            skipped,
+        )
 
     return images
 
@@ -246,10 +310,20 @@ def load_images(supabase, chunks: list[dict]) -> dict[str, str]:
     # crashing, so a single missing figure costs that figure and not the whole
     # answer.
     #
-    # The last line turns the raw picture into a "data URI" — the image rewritten
-    # as one very long line of plain text, which is the only form you can put
-    # inside a JSON message to a model. `base64` is the encoding that does that
-    # rewriting.
+    # `remaining` is a spending allowance, in bytes rather than money. It starts
+    # at the budget for one question and every picture we accept takes its own
+    # size out of it. A picture bigger than what is left is skipped and counted,
+    # and we keep going rather than stopping — so one enormous figure loses only
+    # itself, and the smaller ones after it still get through. At the end, if we
+    # skipped anything at all, one line goes to the log, because otherwise this
+    # is completely invisible: the answer comes back looking perfectly normal,
+    # just built from fewer pictures than were found.
+    #
+    # The line that stores it turns the raw picture into a "data URI" — the image
+    # rewritten as one very long line of plain text, which is the only form you
+    # can put inside a JSON message to a model. `base64` is the encoding that
+    # does that rewriting, and it makes the picture about a third bigger, which
+    # is why the allowance is counted before it rather than after.
 
 
 @traceable(run_type="retriever", process_inputs=tracing.clean_inputs)
@@ -346,6 +420,7 @@ def rewrite_query(question: str, history: list[dict]) -> str:
         ],
         api_key=api_key,
         max_tokens=REWRITE_TOKENS,
+        timeout=HELPER_TIMEOUT,
     )
 
     rewritten = (response.choices[0].message.content or "").strip().strip('"')
@@ -560,6 +635,7 @@ def stream_answer(model: str, messages: list[dict]):
         stream=True,
         api_key=api_key,
         max_tokens=MAX_ANSWER_TOKENS,
+        timeout=ANSWER_TIMEOUT,
     )
 
     for part in response:
@@ -614,6 +690,7 @@ def generate_title(question: str) -> str:
         ],
         api_key=api_key,
         max_tokens=TITLE_TOKENS,
+        timeout=HELPER_TIMEOUT,
     )
 
     title = (response.choices[0].message.content or "").strip().strip('"')
@@ -689,6 +766,33 @@ if __name__ == "__main__":
     degraded = build_messages("Did revenue grow?", sample, {})
     assert not [p for p in degraded[1]["content"] if p["type"] == "image_url"], (
         "an unloadable image still produced an image part"
+    )
+
+    # The image budget. The real ceiling is 4 MB, so the budget is shrunk rather
+    # than several megabytes allocated to prove a comparison, and `download` is
+    # stubbed so this needs neither Storage nor a key. The interesting case is
+    # the *order*: the oversized figure comes first, and skipping it must not
+    # consume the allowance the small one behind it still needs.
+    _sizes = {"user/doc/big.jpg": 2_000, "user/doc/small.jpg": 100}
+    _real_download = ingestion.download
+    _real_budget = MAX_IMAGE_BYTES
+    ingestion.download = lambda _supabase, path: b"x" * _sizes[path]
+    MAX_IMAGE_BYTES = 1_000
+    try:
+        capped = load_images(
+            None,
+            [
+                {"chunk_type": "image", "image_path": "user/doc/big.jpg"},
+                {"chunk_type": "image", "image_path": "user/doc/small.jpg"},
+            ],
+        )
+    finally:
+        ingestion.download = _real_download
+        MAX_IMAGE_BYTES = _real_budget
+
+    assert "user/doc/big.jpg" not in capped, "an image over the budget was inlined"
+    assert "user/doc/small.jpg" in capped, (
+        "an oversized image starved the smaller one behind it"
     )
 
     # Day 9b: history is spliced between the rules and the sources, and adding it
