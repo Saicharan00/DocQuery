@@ -608,7 +608,18 @@ export function ChatView({
       }
     } finally {
       setIsStreaming(false);
-      abortRef.current = null;
+      // Actually tear the request down. This used to only null the ref, which
+      // released our handle on the request without stopping it — so on the
+      // error paths (the stall timer, a corrupted stream) the fetch stayed
+      // alive and the server kept streaming a billable answer to nobody. A
+      // no-op on the normal path, where the response has already ended.
+      controller.abort();
+      // Compared against our own controller rather than nulled outright: a
+      // newer send may already have claimed the ref, and clearing it blindly
+      // would leave that newer request with nothing able to cancel it.
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       // A send that failed before its first token would otherwise leave a blank
       // bubble on screen for good.
       setMessages((current) => {

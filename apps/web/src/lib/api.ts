@@ -102,7 +102,16 @@ async function fetchWithToken(
     // Never interpolate a null token into the header. `Bearer ${null}` becomes
     // the literal string "Bearer null", which the backend can only report as a
     // malformed token — indistinguishable from a real failure.
-    throw new AuthNotReadyError("No active session.");
+    //
+    // `SessionExpiredError`, not `AuthNotReadyError`, and that used to be the
+    // wrong way round. Every caller of this function has already checked
+    // `isLoaded`, so Clerk is loaded by the time we get here and a null token
+    // means there is no session — which does *not* fix itself. Calling it
+    // "not ready" made every caller swallow it as a condition that resolves in
+    // a moment, so the screen simply stayed empty forever. The identical null
+    // twenty lines below was already classified this way; the file used to
+    // contradict itself.
+    throw new SessionExpiredError();
   }
 
   const res = await send(token);
@@ -307,28 +316,46 @@ export function useChatStream() {
       // it throws — which is what turns an invisible dead connection into a
       // visible error message.
 
-      while (true) {
-        const { done, value } = await readOrStall();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await readOrStall();
+          if (done) break;
 
-        // `{ stream: true }` is not optional here. A multi-byte character — é,
-        // an em dash, an emoji — can be split across two network chunks, and
-        // without this the decoder would turn each half into a "�".
-        buffer += decoder.decode(value, { stream: true });
+          // `{ stream: true }` is not optional here. A multi-byte character — é,
+          // an em dash, an emoji — can be split across two network chunks, and
+          // without this the decoder would turn each half into a "�".
+          buffer += decoder.decode(value, { stream: true });
 
-        let split: number;
-        while ((split = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
+          let split: number;
+          while ((split = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, split);
+            buffer = buffer.slice(split + 2);
 
-          const event = parseEvent(block);
-          if (!event) continue;
+            const event = parseEvent(block);
+            if (!event) continue;
 
-          if (event.event === "done" || event.event === "error") {
-            signedOff = true;
+            if (event.event === "done" || event.event === "error") {
+              signedOff = true;
+            }
+            yield event;
           }
-          yield event;
         }
+      } finally {
+        // Without this the reader was simply abandoned. Two live paths throw
+        // straight out of this generator — the 20s stall timer and a corrupted
+        // stream — and a third leaves through `return` when the caller stops
+        // iterating. All three left the reader locked and the response body
+        // open, which per chat.py's own note means the server generator stays
+        // suspended and the model stream stays open *and billable* until
+        // garbage collection happens to notice. The mechanism added to turn an
+        // invisible dead connection into a visible error was itself leaving the
+        // connection running.
+        //
+        // `cancel()` rather than `releaseLock()`: releasing hands back the lock
+        // but leaves the body streaming. Cancelling closes it, which is what
+        // actually reaches the server. It rejects if the stream is already
+        // errored, and there is nothing useful to do about that here.
+        await reader.cancel().catch(() => {});
       }
 
       // `reader.read()` reports `done: true` both for a body that ended

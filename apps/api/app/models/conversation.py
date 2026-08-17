@@ -28,7 +28,7 @@ class ConversationOut(BaseModel):
     contract has to, and the frontend falls back to "New conversation".
 
     `updated_at` is the sort key, not `created_at`: the sidebar is ordered by
-    recent *activity*, and `_save_exchange` touches this column after every
+    recent *activity*, and `_save_answer` touches this column after every
     exchange precisely so that ordering means something.
     """
 

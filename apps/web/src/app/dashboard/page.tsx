@@ -8,7 +8,7 @@ import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentList } from "@/components/document-list";
 import { UploadZone } from "@/components/upload-zone";
-import { AuthNotReadyError, ConflictError, useApi } from "@/lib/api";
+import { AUTH_WAIT_MS, AuthNotReadyError, ConflictError, useApi } from "@/lib/api";
 import type { Document, IngestStep } from "@/lib/types";
 
 /** How long to wait after a step that made no progress. Cohere's limit is per minute. */
@@ -57,20 +57,64 @@ export default function DashboardPage() {
   // Promise chain rather than async/await so the setState calls sit inside
   // callbacks. React's lint rejects state updates made synchronously in an
   // effect body, and an awaited call reads as synchronous to it.
+  // Resolves to whether this attempt reached a conclusion. Only the
+  // auth-not-ready path answers `false`, and only because that one is expected
+  // to be retried automatically. Same contract as the sidebar's `refresh`.
   const refreshDocuments = useCallback(() => {
     return api<Document[]>("/documents")
       .then((result) => {
         setDocuments(result);
         setDocumentsError(null);
+        return true;
       })
       .catch((e: Error) => {
-        if (e instanceof AuthNotReadyError) return;
+        if (e instanceof AuthNotReadyError) return false;
         setDocumentsError(e.message);
+        return true;
       });
   }, [api]);
 
+  // Holds the ceiling timer's id across renders and across the two effects
+  // below, so the fetch effect can clear the *same* timer the mount effect
+  // started.
+  const giveUpRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The ceiling on the auth wait. Swallowing `AuthNotReadyError` is right —
+  // it usually resolves in a moment — but it assumes Clerk always becomes
+  // ready, and this page had nothing to say when it does not. The sidebar and
+  // the chat view both grew this timer; the dashboard was the one screen left
+  // that would sit on "Loading documents…" for as long as the tab stayed open.
+  //
+  // Mount-only, deliberately: keyed on anything that changes while you use the
+  // page, the countdown would restart forever and never fire — which is
+  // precisely how the sidebar's version was broken when it was first written.
+  //
+  // Falling back to an empty list rather than a spinner keeps the upload box
+  // usable instead of leaving the page looking hung.
   useEffect(() => {
-    void refreshDocuments();
+    let cancelled = false;
+
+    giveUpRef.current = setTimeout(() => {
+      if (cancelled) return;
+      setDocuments((current) => current ?? []);
+      setDocumentsError("Could not load your documents. Refresh the page to retry.");
+    }, AUTH_WAIT_MS);
+
+    return () => {
+      cancelled = true;
+      if (giveUpRef.current) clearTimeout(giveUpRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    void refreshDocuments().then((settled) => {
+      // Only a load that actually concluded stands the timer down. An
+      // auth-not-ready answer is the exact case it is there to bound.
+      if (settled && giveUpRef.current) {
+        clearTimeout(giveUpRef.current);
+        giveUpRef.current = null;
+      }
+    });
   }, [refreshDocuments]);
 
   // ---------------------------------------------------------------------
@@ -257,15 +301,23 @@ export default function DashboardPage() {
   );
 
   const handleDeleted = useCallback(
-    (id: string) => {
+    async (id: string) => {
       // Marked before the refetch below, so it's in place by the time it
       // could possibly matter — the ingest loop's own next request, sent
       // independently, is the only other thing racing to read this set.
       deletedIds.current.add(id);
-      return refreshDocuments();
+      await refreshDocuments();
     },
     [refreshDocuments],
   );
+
+  // `refreshDocuments` now answers *whether the load settled*, which the auth
+  // ceiling above needs but these two children do not. Both keep the callback
+  // in a dependency array, so this has to be a stable function rather than an
+  // arrow written inline in the JSX.
+  const handleUploaded = useCallback(async () => {
+    await refreshDocuments();
+  }, [refreshDocuments]);
 
   useEffect(() => {
     // Covers both cases with one rule: a document just uploaded arrives here as
@@ -306,7 +358,7 @@ export default function DashboardPage() {
             re-fetches rather than editing the list locally, so what you see is
             what the server actually has. It is also the call Day 6 will poll
             to watch pending -> processing -> ready. */}
-        <UploadZone onUploaded={refreshDocuments} />
+        <UploadZone onUploaded={handleUploaded} />
 
         <div className="mt-6">
           {documentsError && (
