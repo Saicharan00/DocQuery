@@ -8,6 +8,7 @@ import { ArrowLeft, Send, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  AUTH_WAIT_MS,
   AuthNotReadyError,
   useApi,
   useAuthedFetch,
@@ -47,10 +48,17 @@ function ChunkImage({ source }: { source: Source }) {
   useEffect(() => {
     if (!chunkId) return;
 
+    // Lets cleanup cancel the request itself, not just its effect on state.
+    // Without this, switching conversation left every in-flight figure
+    // downloading to completion for no one — nothing on screen was still
+    // waiting for it, but the browser had no way to know that.
+    const controller = new AbortController();
     let objectUrl: string | null = null;
     let cancelled = false;
 
-    authedFetch(`/documents/${documentId}/images/${chunkId}`)
+    authedFetch(`/documents/${documentId}/images/${chunkId}`, {
+      signal: controller.signal,
+    })
       .then((res) => res.blob())
       .then((blob) => {
         if (cancelled) return;
@@ -63,15 +71,29 @@ function ChunkImage({ source }: { source: Source }) {
         // moment it has, which re-runs this effect, so the right move is to
         // keep showing the placeholder and say nothing.
         if (e instanceof AuthNotReadyError) return;
+        // Our own cleanup below aborted this fetch — not a real failure, and
+        // showing "couldn't be loaded" for it would be a lie.
+        if (e instanceof DOMException && e.name === "AbortError") return;
         setFailed(true);
       });
 
     return () => {
       cancelled = true;
-      // An object URL pins its blob in memory until it is revoked. Page images
-      // run to hundreds of kilobytes each and a long conversation cites many,
-      // so leaving them would grow the tab's memory for as long as it is open.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      // This cleanup runs on unmount, but also on a *dependency change* —
+      // `chunkId`/`documentId` switching under an already-mounted component,
+      // which is exactly what happens when a click moves to a different
+      // conversation while a figure is still loading. An object URL pins its
+      // blob in memory until it is revoked, so revoking here is right either
+      // way. But `url` state isn't cleared by a revoke — it would keep naming
+      // this now-dead address until the new fetch lands, and `<img src>`
+      // would render broken in the meantime. Clearing it here (only if it's
+      // still this effect's own URL) falls back to the loading placeholder
+      // instead.
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        setUrl((current) => (current === objectUrl ? null : current));
+      }
     };
   }, [authedFetch, chunkId, documentId]);
 
@@ -79,8 +101,13 @@ function ChunkImage({ source }: { source: Source }) {
   // its picture with the login token attached, and turn what comes back into a
   // temporary local address the <img> tag can use. `cancelled` covers scrolling
   // away or switching conversation before it arrives — the cleanup runs first,
-  // so the reply finds `cancelled` already true and quietly stops. Whatever was
-  // created gets thrown away on the way out, so the memory is handed back.
+  // so the reply finds `cancelled` already true and quietly stops. The
+  // `AbortController` goes further and tells the browser to stop downloading
+  // altogether, rather than just ignoring the answer once it shows up.
+  // Whatever was created gets thrown away on the way out, so the memory is
+  // handed back — and if that throw-away happened because the figure being
+  // shown changed (not because this component went away), the on-screen state
+  // is cleared to match, instead of pointing at a URL that no longer works.
 
   // An answer saved before this feature has no chunk id in its stored sources,
   // so there is nothing to fetch. It keeps its citation and shows no picture.
@@ -348,28 +375,77 @@ export function ChatView({
   // depends on which request is in flight.
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    const container = scrollRef.current;
+    if (!container) return;
+
+    // How far the bottom of what's visible is from the true bottom of the
+    // scrollable area. Zero means "already at the bottom".
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    // Only follow the stream if the reader was already near the bottom. Every
+    // streamed token replaces the `messages` array, which used to re-run this
+    // effect and yank the view down hundreds of times per answer — scrolling
+    // up to re-read anything mid-answer was impossible. 100px is a small
+    // enough margin to count as "still following along".
+    if (distanceFromBottom < 100) {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+    }
   }, [messages]);
 
   // Leaving the page mid-answer aborts the request rather than leaving it to
   // stream into a component that no longer exists.
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Which conversation's history has already been applied. Load-once, and it
+  // has to be: the effect below re-runs whenever `api` changes identity, which
+  // is the very mechanism that retries after `AuthNotReadyError`. Since the
+  // load now *prepends* rather than replaces, a second successful run would
+  // append the whole conversation to itself and every message would appear
+  // twice.
+  //
+  // Only set on success, so the auth retry it is built around still works.
+  const loadedConversation = useRef<string | null>(null);
+
   // Everything said in this conversation before the page was opened. This is
   // the point of Day 9a: without it a reload shows an empty screen, because the
   // messages only ever existed in the React state of a page that has gone.
   useEffect(() => {
     if (!initialConversationId) return;
+    if (loadedConversation.current === initialConversationId) return;
 
     let cancelled = false;
+
+    // The ceiling on the quiet wait in the catch below. Cleared by whichever
+    // outcome arrives first, so it only ever fires when nothing arrives at all.
+    const giveUp = setTimeout(() => {
+      if (cancelled) return;
+      setIsLoadingHistory(false);
+      setError("Could not load this conversation. Refresh the page to retry.");
+    }, AUTH_WAIT_MS);
 
     api<MessageRow[]>(`/conversations/${initialConversationId}/messages`)
       .then((rows) => {
         if (cancelled) return;
-        setMessages(
-          rows.map((row) => ({
+        clearTimeout(giveUp);
+        loadedConversation.current = initialConversationId;
+        // Prepend, never replace. `send` is gated on `isLoadingHistory` so in
+        // practice nothing should be on screen yet — this is the second lock on
+        // the same door, and it is here because the failure it prevents is
+        // silent and nasty. A wholesale replace dropped the question you had
+        // just asked and the answer streaming under it, and since `updateLast`
+        // rewrites by *index*, every subsequent token then appended onto the
+        // last historical row — the model's reply visibly growing inside one of
+        // your own user bubbles, with the feedback buttons beneath it rating a
+        // different answer entirely.
+        //
+        // Prepending keeps the live exchange last, which is exactly what
+        // `updateLast` needs, and puts the history where it belongs: before it.
+        setMessages((current) => [
+          ...rows.map((row) => ({
             role: row.role,
             content: row.content,
             // `sources` is null on user rows and on any answer saved before
@@ -381,7 +457,8 @@ export function ChatView({
             // answered before that, and null means no buttons.
             runId: row.run_id,
           })),
-        );
+          ...current,
+        ]);
         setError(null);
         setIsLoadingHistory(false);
       })
@@ -390,13 +467,23 @@ export function ChatView({
         // Clerk hasn't produced a token yet. `api` changes identity the moment
         // it has, which re-runs this effect — so the right move is to keep
         // showing "Loading…" and say nothing.
+        //
+        // The timer is deliberately *not* cleared on this path: this is the one
+        // outcome that resolves itself, and it is exactly the case the timer is
+        // there to bound. If the token never arrives, no further call reaches
+        // this component and the timer is the only thing left to speak up.
         if (e instanceof AuthNotReadyError) return;
+        clearTimeout(giveUp);
         setError(e.message);
         setIsLoadingHistory(false);
       });
 
     return () => {
       cancelled = true;
+      // Covers unmount and a re-run of this effect. Without it a load that
+      // succeeded in a second would still be overwritten by an error nine
+      // seconds later.
+      clearTimeout(giveUp);
     };
   }, [api, initialConversationId]);
 
@@ -421,7 +508,12 @@ export function ChatView({
     const question = input.trim();
     // An empty question would still cost a Cohere embedding call, and a second
     // send while one is running would interleave two answers into one bubble.
-    if (!question || isStreaming) return;
+    //
+    // `isLoadingHistory` is the third: until the history arrives this component
+    // does not yet know what conversation it is in, and a send started now
+    // would race the load. The guard lives here and not only on the button,
+    // because Enter reaches this function without going through it.
+    if (!question || isStreaming || isLoadingHistory) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -516,7 +608,18 @@ export function ChatView({
       }
     } finally {
       setIsStreaming(false);
-      abortRef.current = null;
+      // Actually tear the request down. This used to only null the ref, which
+      // released our handle on the request without stopping it — so on the
+      // error paths (the stall timer, a corrupted stream) the fetch stayed
+      // alive and the server kept streaming a billable answer to nobody. A
+      // no-op on the normal path, where the response has already ended.
+      controller.abort();
+      // Compared against our own controller rather than nulled outright: a
+      // newer send may already have claimed the ref, and clearing it blindly
+      // would leave that newer request with nothing able to cancel it.
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       // A send that failed before its first token would otherwise leave a blank
       // bubble on screen for good.
       setMessages((current) => {
@@ -526,7 +629,15 @@ export function ChatView({
           : current;
       });
     }
-  }, [conversationId, input, isStreaming, model, streamChat, updateLast]);
+  }, [
+    conversationId,
+    input,
+    isLoadingHistory,
+    isStreaming,
+    model,
+    streamChat,
+    updateLast,
+  ]);
 
   // "New chat" lives in the sidebar and is an ordinary link to /dashboard/chat.
   // Usually that link unmounts this component and mounts a fresh one, and there
@@ -594,7 +705,7 @@ export function ChatView({
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto py-6">
+      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto py-6">
         {isLoadingHistory && (
           <p className="mt-12 text-center text-sm text-muted-foreground">
             Loading conversation…
@@ -692,14 +803,23 @@ export function ChatView({
           }}
           rows={2}
           maxLength={2000}
-          placeholder="Ask a question…  (Enter to send, Shift+Enter for a new line)"
-          className="max-h-40 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm field-sizing-content focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          // Disabled while the history loads, so the box matches what `send`
+          // will actually do. Leaving it typable was the visible half of the
+          // bug: the page looked ready, and a question typed into it was
+          // swallowed when the history landed.
+          disabled={isLoadingHistory}
+          placeholder={
+            isLoadingHistory
+              ? "Loading conversation…"
+              : "Ask a question…  (Enter to send, Shift+Enter for a new line)"
+          }
+          className="max-h-40 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm field-sizing-content focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
         />
 
         <Button
           size="icon"
           aria-label="Send"
-          disabled={isStreaming || input.trim() === ""}
+          disabled={isStreaming || isLoadingHistory || input.trim() === ""}
           onClick={() => void send()}
         >
           <Send />
