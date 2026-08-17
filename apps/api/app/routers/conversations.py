@@ -92,7 +92,7 @@ def list_conversations(
 
     # Sorted by `updated_at`, not `created_at`: a conversation you replied to an
     # hour ago belongs above one you started last week and abandoned.
-    # `_save_exchange` in chat.py touches that column after every exchange for
+    # `_save_answer` in chat.py touches that column after every exchange for
     # exactly this reason.
 
 

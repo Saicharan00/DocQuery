@@ -101,7 +101,25 @@ class JwksCache:
 
             if self._keys and time.monotonic() - self._fetched_at < JWKS_MIN_REFETCH_SECONDS:
                 # Don't hammer Clerk when a bad `kid` is retried in a loop.
-                raise _unauthorized("Token signing key is not recognised.")
+                #
+                # 503, not 401, and the difference is the whole of finding 5.
+                # Inside this window we are *declining to look*, so we genuinely
+                # cannot tell a junk token from a real key rotation — and a real
+                # rotation is exactly when every token in existence carries a
+                # `kid` we have not seen. Answering 401 told the browser "your
+                # token is stale", so `fetchWithToken` retried immediately with
+                # `skipCache`, hit the same unexpired window, got a second 401
+                # and reported `SessionExpiredError`. A healthy user was told to
+                # sign in again, and signing in again did not help, because the
+                # new token carried the same new key.
+                #
+                # 503 says what is true — "ask me again shortly" — and the
+                # browser does not burn the window trying to fix a token that
+                # was never the problem.
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Still verifying your session. Please try again in a moment.",
+                )
 
             if time.monotonic() - self._failed_at < JWKS_FAILURE_BACKOFF_SECONDS:
                 # A refresh failed moments ago, so don't attempt another one
@@ -150,9 +168,12 @@ class JwksCache:
     # touches the network not at all.
     #
     # Otherwise queue up, one request at a time, and look again — somebody
-    # ahead in the queue may have just fetched what we need. If a request in the
-    # last thirty seconds already asked for a key nobody recognises, don't ask
-    # again; that is somebody retrying a junk token in a loop.
+    # ahead in the queue may have just fetched what we need. If we already
+    # fetched in the last thirty seconds and the key still is not there, don't
+    # fetch again; that is usually somebody retrying a junk token in a loop. But
+    # say "try again shortly" rather than "your token is bad", because from in
+    # here those two look identical, and one of them is a real key rotation
+    # where the token is perfectly fine.
     #
     # If a fetch failed in the last thirty seconds and we happen to hold the key
     # being asked for, use our old copy instead of trying again. And if a fetch

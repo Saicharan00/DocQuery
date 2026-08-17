@@ -10,10 +10,19 @@ order, and the order is the design:
 
     spend cap → load history → rewrite the question → embed → retrieve
               → no chunks? 400 → load images → create/verify conversation
+              → record the question → spend cap again
               → THEN StreamingResponse
 
 The cap is first because it is free; everything below it costs money, so nothing
 below it runs for a caller who has had enough for one day.
+
+The cap appears *twice*, and the second one is the one that binds. The count it
+reads is of `messages` rows, and this request only adds its own row partway
+down — so the first check reads a number this request has not yet moved, and a
+burst of simultaneous tabs would all read the same stale value and all pass.
+Recording the question before the model is called is what lets concurrent
+requests see one another, and it is also what stops a paid call that later
+fails to save from costing nothing against the allowance.
 
 History and the rewrite come *before* the embed and that ordering is the whole of
 Day 9b: a follow-up like "give count" carries no subject, and once it has been
@@ -54,12 +63,12 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 TITLE_CHARS = 60
 
 # The answer has to finish while the caller's token is still alive, because
-# `_save_exchange` and `_retitle` ride on that same token — the Supabase client
+# `_save_answer` and `_retitle` ride on that same token — the Supabase client
 # carries it verbatim, which is what makes RLS work. Clerk hands the browser a
 # *cached* token and refreshes it only near expiry, so a request routinely
 # arrives with twenty seconds of life rather than a full minute. Without a
 # deadline the answer reaches the screen complete, the insert then 401s,
-# `_save_exchange` swallows it, and the answer is gone on reload.
+# `_save_answer` swallows it, and the answer is gone on reload.
 #
 # The margin is the gap left between the last token we emit and the moment the
 # credential dies, so the two writes underneath have room to land.
@@ -77,7 +86,7 @@ TOKEN_SAFETY_MARGIN_SECONDS = 5
 MIN_ANSWER_BUDGET_SECONDS = 15
 
 
-def _enforce_daily_limit(supabase) -> None:
+def _enforce_daily_limit(supabase, *, already_counted: bool = False) -> None:
     """Refuse a question once enough have been asked today.
 
     The twin of `_enforce_daily_limit` in `documents.py`, deliberately written
@@ -90,11 +99,31 @@ def _enforce_daily_limit(supabase) -> None:
     turn it is stops mattering. It reads a count RLS would otherwise hide, via
     the `security definer` function in migration 005.
 
-    Only `role = 'user'` rows are counted. One user message is exactly one LLM
-    call; the assistant row is its result, and counting both would silently
-    halve the cap.
+    **Called twice per request, and that is what makes the cap real.** The first
+    call is free and refuses before a cent is spent. The second runs *after*
+    this question's own row has been written, which is the half that holds
+    against a burst: the count used to move only at the very *end* of a
+    request, so twenty tabs submitted together all read the same stale number
+    and all passed. Now each request writes its row first and then re-reads, so
+    they can see one another.
+
+    `already_counted` says whether our own row is in the number yet. When it is,
+    the caps become "more than" rather than "at least" — otherwise the 30th
+    question of a 30-a-day allowance would refuse itself.
+
+    Only `role = 'user'` rows are counted, which makes this a cap on *questions
+    asked*, not on model calls billed. Since Day 9b those are no longer the same
+    thing: one question can bill up to three completions — `rewrite_query`, the
+    answer itself, and `generate_title`. The note that used to sit here claimed
+    the opposite ("one user message is exactly one LLM call"), which is exactly
+    the sort of confident comment that stops anyone checking. Whether
+    `max_messages_per_day` should come down to match is a spending decision, not
+    a code one, so it is left alone here.
     """
     settings = get_settings()
+
+    # Room for this request's own row when it has already been written.
+    allowance = 1 if already_counted else 0
 
     try:
         today = supabase.rpc("messages_created_today").execute()
@@ -105,7 +134,7 @@ def _enforce_daily_limit(supabase) -> None:
             detail="Could not check service capacity. Please try again.",
         ) from exc
 
-    if (today.data or 0) >= settings.global_daily_message_limit:
+    if (today.data or 0) >= settings.global_daily_message_limit + allowance:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="This demo has hit its daily limit. Please try again tomorrow.",
@@ -130,7 +159,7 @@ def _enforce_daily_limit(supabase) -> None:
         ) from exc
 
     limit = settings.max_messages_per_day
-    if (recent.count or 0) >= limit:
+    if (recent.count or 0) >= limit + allowance:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Daily message limit reached ({limit} questions in 24 hours). Try again tomorrow.",
@@ -213,51 +242,110 @@ def _resolve_conversation(
     return conversation_id, False
 
 
-def _save_exchange(
+def _record_question(
+    supabase, user_id: str, conversation_id: UUID, question: str
+) -> None:
+    """Write the user's message *before* the answer is paid for.
+
+    This used to go in one insert together with the answer, at the end. Moving
+    it up here is the load-bearing half of the daily cap: the row is the thing
+    the cap counts, so writing it last meant a paid call that then failed to
+    save left the counter untouched — free retries, indefinitely — and a burst
+    of simultaneous requests each counted a number that none of them had moved
+    yet.
+
+    Unlike `_save_answer` below, this one raises rather than swallowing.
+    Nothing has been spent at this point, so a failure costs the caller one
+    retry, whereas carrying on would buy an answer the cap could never see.
+
+    The trade-off accepted: a question whose answer then fails stays in the
+    history with no reply under it. That is the right way round — it is what
+    actually happened, it is honest about what was spent, and asking again
+    simply adds the next exchange.
+    """
+    try:
+        supabase.table("messages").insert(
+            {
+                # From the verified token, never the request body. RLS re-checks
+                # it, so this cannot write into somebody else's conversation.
+                "user_id": user_id,
+                "conversation_id": str(conversation_id),
+                "role": "user",
+                "content": question,
+            }
+        ).execute()
+    except Exception as exc:
+        logger.exception("Could not record the question in conversation %s", conversation_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not send your question. Please try again.",
+        ) from exc
+
+
+def _discard_conversation(supabase, conversation_id: UUID) -> None:
+    """Delete a conversation that was created moments ago and will hold nothing.
+
+    The `conversations` row is inserted before the stream opens so the browser
+    can be handed its id immediately. Anything failing between there and the
+    first saved message used to leave a titled conversation with zero messages
+    in it, sitting in the sidebar forever, opening onto nothing, and never
+    retitled.
+
+    Only called where nothing was answered *and* nothing was recorded, so there
+    is genuinely nothing to lose. `messages` is `on delete cascade`
+    (001_init.sql), so a question written a moment earlier goes with it.
+
+    Swallows its own failure: the request is already failing for a reason the
+    caller cares about far more than sidebar tidiness, and that reason must not
+    be replaced by this one.
+    """
+    try:
+        supabase.table("conversations").delete().eq(
+            "id", str(conversation_id)
+        ).execute()
+    except Exception:
+        logger.exception("Could not discard the empty conversation %s", conversation_id)
+
+
+def _save_answer(
     supabase,
     user_id: str,
     conversation_id: UUID,
-    question: str,
     answer: str,
     model: str,
     sources: list[dict],
     run_id: str | None,
 ) -> None:
-    """Write the question and the answer, then touch the conversation.
+    """Write the answer, then touch the conversation.
 
-    Both rows in one insert: they are one exchange, and a half-saved exchange is
-    a conversation that reads as though the assistant spoke first. `sources`
-    rides on the assistant row because it describes that answer — Day 8 renders
-    it directly from here rather than searching again.
+    The question is already in the table — `_record_question` put it there
+    before the model was called — so this writes the other half. That ordering
+    also means a half-saved exchange can now only ever be a question without an
+    answer, never an answer with no question above it.
+
+    `sources` rides on the assistant row because it describes that answer —
+    Day 8 renders it directly from here rather than searching again.
 
     Deliberately swallows its own failure. The user has already read the answer;
     raising now would replace a saved-or-not question with an error banner
     underneath text they can plainly see. It is logged loudly instead.
     """
-    rows = [
-        {
-            "user_id": user_id,
-            "conversation_id": str(conversation_id),
-            "role": "user",
-            "content": question,
-        },
-        {
-            "user_id": user_id,
-            "conversation_id": str(conversation_id),
-            "role": "assistant",
-            "content": answer,
-            "model": model,
-            "sources": sources,
-            # Only on the assistant row: it names the pipeline run that produced
-            # this text, and a question was not produced by one. Null whenever
-            # tracing is off, which is what keeps saving an answer independent of
-            # whether the observability vendor is switched on.
-            "run_id": run_id,
-        },
-    ]
+    row = {
+        "user_id": user_id,
+        "conversation_id": str(conversation_id),
+        "role": "assistant",
+        "content": answer,
+        "model": model,
+        "sources": sources,
+        # Only on the assistant row: it names the pipeline run that produced
+        # this text, and a question was not produced by one. Null whenever
+        # tracing is off, which is what keeps saving an answer independent of
+        # whether the observability vendor is switched on.
+        "run_id": run_id,
+    }
 
     try:
-        supabase.table("messages").insert(rows).execute()
+        supabase.table("messages").insert(row).execute()
         # Without this, `updated_at` records when the conversation was created
         # and never moves again — so a sidebar sorted by recent activity would
         # be sorted by nothing.
@@ -278,7 +366,7 @@ def _retitle(supabase, conversation_id: UUID, question: str) -> str | None:
     placeholder from `_resolve_conversation` stays, which is why there is
     something to fall back to.
 
-    Same swallow-and-log bargain `_save_exchange` makes, for the same reason.
+    Same swallow-and-log bargain `_save_answer` makes, for the same reason.
     """
     try:
         title = rag.generate_title(question)
@@ -298,7 +386,7 @@ def _retitle(supabase, conversation_id: UUID, question: str) -> str | None:
 
     # `updated_at` is left alone deliberately, the same as a manual rename in
     # `conversations.py`. It means "when was this last talked in" and the sidebar
-    # sorts by it; `_save_exchange` has already moved it to now, and touching it
+    # sorts by it; `_save_answer` has already moved it to now, and touching it
     # again here would be a second write saying nothing new.
 
 
@@ -460,6 +548,21 @@ def chat(
             conversation_id, is_new = _resolve_conversation(
                 supabase, user_id, request.conversation_id, request.message
             )
+
+            try:
+                _record_question(supabase, user_id, conversation_id, request.message)
+                # The cap check that actually binds. The one at the top of this
+                # handler read a count that this request had not yet moved, so
+                # simultaneous requests could not see each other; this one runs
+                # with our own row already written.
+                _enforce_daily_limit(supabase, already_counted=True)
+            except Exception:
+                if is_new:
+                    # Nothing asked, nothing answered, and a conversation we
+                    # minted seconds ago. Leaving it would put an empty titled
+                    # row in the sidebar that opens onto nothing.
+                    _discard_conversation(supabase, conversation_id)
+                raise
     except Exception as exc:
         tracing.finish_root(root, error=repr(exc))
         raise
@@ -535,11 +638,10 @@ def chat(
                 yield _event("error", {"detail": "The model returned an empty answer. Please try again."})
                 return
 
-            _save_exchange(
+            _save_answer(
                 supabase,
                 user_id,
                 conversation_id,
-                request.message,
                 full,
                 request.model,
                 sources,
@@ -630,10 +732,10 @@ def chat(
     # ponytail: a browser that disconnects mid-answer is abandoned, not closed.
     # Measured 2026-08-14: Starlette never closes this generator, so `generate()`
     # is left suspended at a `yield` and THREE things follow from that one cause —
-    # `_save_exchange` never runs, the `finally` above never runs so the trace
+    # `_save_answer` never runs, the `finally` above never runs so the trace
     # stays "running", and the model stream stays open and billable until the
     # garbage collector happens to get to it. Left alone deliberately in 10a: the
-    # fix belongs outside this function and lands with the `_save_exchange`
+    # fix belongs outside this function and lands with the `_save_answer`
     # decision in 10b. Upgrade path: close the root from an ASGI middleware, or
     # hand Starlette a wrapper object that owns closing the generator.
     return StreamingResponse(
