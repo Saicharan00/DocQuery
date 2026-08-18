@@ -622,10 +622,28 @@ def stream_answer(model: str, messages: list[dict]):
     (real environment variables) and misses it locally — a bug that appears on
     exactly one machine, which is the worst kind to debug.
 
-    Raises before the first token if the model is unusable, so the router can
-    still answer with an HTTP status code. Once this generator yields, the
-    response status is already on the wire and an error can only be an SSE
+    **This does not validate anything when you call it.** It contains `yield`,
+    so calling it builds a generator and runs no code at all — `api_key_for`
+    below does not execute until the first `next()`. An earlier version of this
+    docstring claimed the opposite ("raises before the first token if the model
+    is unusable"), which was wrong in the most expensive direction: a caller
+    who believes it wraps the call in a try/except, sees nothing raised, starts
+    the response, and only then discovers the model is unusable — by which
+    point the status line is on the wire and the failure can only be an SSE
     event.
+
+    The guarantee is real, but it belongs to the caller: `/chat` calls the
+    public `api_key_for(model)` as a pre-flight *before* the response starts.
+    **Anything importing this function standalone — Day 11's eval harness — must
+    do the same, or handle the error at the first token instead.**
+
+    Left as a generator deliberately. Restructuring it to validate eagerly does
+    work, and was measured: the error then surfaces at call time. But
+    `@traceable` above branches on `inspect.isgeneratorfunction`, and a function
+    that merely *returns* a generator fails that test, so `reduce_fn` stops
+    being applied and the trace records a generator object where the answer
+    should be. That trades a wrong sentence here for a dashboard that is quietly
+    wrong — the exact failure Day 10a and finding 14 were both about.
     """
     api_key = api_key_for(model)
 
