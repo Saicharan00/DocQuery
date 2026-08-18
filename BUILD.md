@@ -531,8 +531,10 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
 
 - [x] Every chat message produces a visible LangSmith trace with the full pipeline breakdown.
       *(Verified locally 2026-08-14: one trace, 7 spans, 0 detached. Railway still to confirm.)*
-- [ ] One trace is public — URL saved. *(Needs a click in the LangSmith UI — the
-      SDK cannot share a run. Blocked on nothing else.)*
+- [x] One trace is public — URL saved. *(2026-08-18: "what is it about" over
+      "The Shift to Agentic AI: Evidence from Codex" — a public research paper,
+      chosen so the visible chunk text carries nothing private.)*
+      <https://smith.langchain.com/public/a2fadc70-e959-406c-b16b-5d1e9363668e/r/01a015ef-f43e-7150-af0a-79baa279220e>
 - [x] Every error path shows the user something meaningful. *(10b, 2026-08-17.)*
       *Step 8 re-verified on this branch: zero `console.error`/`console.log` in
       `apps/web/src`, and every `print(` in `apps/api/app` is a self-check "OK"
@@ -583,7 +585,8 @@ normally with tracing switched off.
   `self.background()` — so that fix would have worked on one path and silently
   not on the other. A middleware's `finally` covers both.
 - **The zero-documents 400 path** — needs an account with nothing uploaded.
-- **Railway**, and therefore the public trace URL.
+- ~~**Railway**, and therefore the public trace URL.~~ **Resolved 2026-08-18** —
+  deployed, and the URL is saved in the Done-when list above.
 
 **One real bug surfaced by tracing, cause still unknown.** On one request all four
 image chunks failed to download and the answer went out looking perfectly normal,
