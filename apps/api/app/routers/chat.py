@@ -43,7 +43,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, status
+import litellm
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
@@ -430,6 +431,90 @@ def _safe_trace_error(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+# What the reader is told when an answer dies half-written, by cause.
+#
+# Every one of these used to be "The answer stopped early. Please try again." —
+# which is advice, and for three of the five it is *wrong* advice. Trying again
+# immediately makes a rate limit worse; it cannot help a revoked key; and it
+# will fail identically on a conversation that has outgrown the model's context.
+# BUILD.md's step 7 names exactly these four, and this is where they land.
+#
+# Ordered, and the order is load-bearing: `ContextWindowExceededError` and
+# `ContentPolicyViolationError` are both subclasses of `BadRequestError`
+# (checked against the installed litellm, not assumed), so a `BadRequestError`
+# entry placed above them would swallow both and report the generic message.
+#
+# The strings are ours. None of them interpolates the provider's text, for the
+# same reason `_safe_trace_error` exists: a provider message can quote the
+# request it just made, and this one is going to a browser.
+_STREAM_FAILURES: tuple[tuple[type[Exception], str, str], ...] = (
+    (
+        litellm.ContextWindowExceededError,
+        "context window exceeded",
+        "This conversation has grown too long for the model. "
+        "Start a new chat to carry on.",
+    ),
+    (
+        litellm.ContentPolicyViolationError,
+        "content policy",
+        "The model refused to answer this one. Try rewording the question.",
+    ),
+    (
+        litellm.AuthenticationError,
+        "provider rejected our credentials",
+        "The answer service is misconfigured. This is our problem, not yours — "
+        "please try again later.",
+    ),
+    (
+        litellm.PermissionDeniedError,
+        "provider denied permission",
+        "The answer service is misconfigured. This is our problem, not yours — "
+        "please try again later.",
+    ),
+    (
+        litellm.RateLimitError,
+        "provider rate limit",
+        "The answer service is busy right now. Wait a moment and ask again.",
+    ),
+    (
+        litellm.Timeout,
+        "provider timed out",
+        "The model took too long to answer. Please try again.",
+    ),
+    (
+        litellm.ServiceUnavailableError,
+        "provider unavailable",
+        "The answer service is temporarily unavailable. Please try again shortly.",
+    ),
+    (
+        litellm.APIConnectionError,
+        "could not reach provider",
+        "Could not reach the answer service. Please try again shortly.",
+    ),
+)
+
+
+def _stream_failure(exc: BaseException) -> tuple[str, str]:
+    """(what the trace records, what the reader is told) for a dead stream.
+
+    Two strings rather than one because they have different audiences and
+    different rules. The trace label is for the dashboard and may name the
+    cause plainly; the reader's line has to be actionable, and must never carry
+    provider text.
+    """
+    for kind, label, detail in _STREAM_FAILURES:
+        if isinstance(exc, kind):
+            return label, detail
+
+    return "Generation failed", "The answer stopped early. Please try again."
+
+    # In plain English: work down the list looking for the first entry whose
+    # error type matches what actually went wrong, and use its pair of
+    # sentences. If nothing matches, fall back to the old generic pair — an
+    # unknown failure is still a failure, and saying something vague is better
+    # than saying something confidently wrong.
+
+
 # In plain English: when something goes wrong we write the reason onto the
 # record of this question. That record can be shared with anyone. So we write
 # our own error messages out in full — we wrote them for people to read — but
@@ -450,6 +535,10 @@ def chat(
     supabase: SupabaseClient,
     expires_at: TokenExpiry,
     request: ChatRequest,
+    # The ASGI request, not the JSON body — `request` above is already taken by
+    # the body. Needed only to hand this response's generator to the
+    # `close_on_disconnect` middleware; see the bottom of this function.
+    http_request: Request,
 ) -> StreamingResponse:
     """Answer a question from the caller's own documents, streaming the reply."""
     # First, before the cap check and before a cent is spent: is this token
@@ -639,6 +728,10 @@ def chat(
         # rather than per token.
         deadline = expires_at - TOKEN_SAFETY_MARGIN_SECONDS
         cut_short = False
+        # Whether the answer already has a row. Read by the `finally`, which now
+        # runs on disconnect too and must not file a second copy of an answer
+        # that was saved normally.
+        saved = False
 
         try:
             # `run_id` rides along here rather than in an event of its own: this
@@ -694,6 +787,7 @@ def chat(
                 sources,
                 str(root.id) if root else None,
             )
+            saved = True
 
             if cut_short:
                 # Saved first, then reported — that order is the point of the
@@ -723,31 +817,59 @@ def chat(
 
             finished = True
             yield _event("done", {})
-        except Exception:
+        except Exception as exc:
             logger.exception("Generation failed in conversation %s", conversation_id)
-            failure = "Generation failed"
-            # No exception text: a provider error can echo request details, and
-            # this string is going to a browser.
-            yield _event("error", {"detail": "The answer stopped early. Please try again."})
+            # Still no exception text on the wire — a provider error can echo
+            # request details and this string is going to a browser. What
+            # changed is that the *cause* now picks which of our own sentences
+            # is sent, so "wait a moment" and "start a new chat" reach the
+            # people they actually help instead of one line of advice that was
+            # wrong for most of them.
+            failure, detail = _stream_failure(exc)
+            yield _event("error", {"detail": detail})
         finally:
-            # Runs on every path that reaches the end of this generator: a
-            # finished answer, an empty one, or a provider failure.
+            # Runs on every path out of this generator: a finished answer, an
+            # empty one, a provider failure — and, since finding 30 was fixed,
+            # a browser that went away.
             #
-            # It does NOT run on client disconnect, which was the original reason
-            # for writing it. Measured 2026-08-14, not assumed: Starlette's
-            # `iterate_in_threadpool` (concurrency.py:51-59) pulls this generator
-            # but has no `finally` closing it, and on disconnect `stream_response`
-            # raises `ClientDisconnect` and abandons it mid-`yield`. Nothing
-            # throws GeneratorExit in, so this block is never entered and the
-            # trace stays "running" in the dashboard. `finished` is still set and
-            # read here so that whatever eventually collects the generator records
-            # the truth. Fixing the abandonment has to happen outside this
-            # function — see the note below the return.
+            # That last one used not to reach here at all. Measured 2026-08-14,
+            # not assumed: Starlette's `iterate_in_threadpool`
+            # (concurrency.py:51-59) pulls this generator but has no `finally`
+            # closing it, so on disconnect it was abandoned mid-`yield`, nothing
+            # threw `GeneratorExit` in, and this block never ran. The fix is the
+            # `close_on_disconnect` middleware in main.py, which calls `.close()`
+            # on this generator when the request ends however it ends. `close()`
+            # raises `GeneratorExit` at the suspended `yield`, which lands here.
+            #
+            # `GeneratorExit` inherits from `BaseException`, not `Exception`, so
+            # it goes straight past the handler above without being mistaken for
+            # a provider failure — and nothing in this block may `yield`, or
+            # closing would raise `RuntimeError`.
             if failure is None and not finished:
                 failure = "Client disconnected before the answer finished"
+
+            # The answer the reader never got to see the end of. Saving it is
+            # the point rather than a nicety: the same reasoning the cut-short
+            # path already follows, that a partial answer you can find again
+            # beats a whole one that vanished. `saved` stops a second copy on
+            # the normal path, and `.strip()` keeps the deliberate decision
+            # above — an empty answer is reported and not stored — intact.
+            full_answer = "".join(answer)
+            if not saved and full_answer.strip():
+                _save_answer(
+                    supabase,
+                    user_id,
+                    conversation_id,
+                    full_answer,
+                    request.model,
+                    sources,
+                    str(root.id) if root else None,
+                )
+                saved = True
+
             tracing.finish_root(
                 root,
-                outputs={"answer": "".join(answer)},
+                outputs={"answer": full_answer},
                 error=failure,
                 metadata={"conversation_id": str(conversation_id)},
             )
@@ -776,17 +898,32 @@ def chat(
         # failed, or you closed the tab — and its one job is to write down how
         # this question ended before the record is filed away.
 
-    # ponytail: a browser that disconnects mid-answer is abandoned, not closed.
-    # Measured 2026-08-14: Starlette never closes this generator, so `generate()`
-    # is left suspended at a `yield` and THREE things follow from that one cause —
-    # `_save_answer` never runs, the `finally` above never runs so the trace
-    # stays "running", and the model stream stays open and billable until the
-    # garbage collector happens to get to it. Left alone deliberately in 10a: the
-    # fix belongs outside this function and lands with the `_save_answer`
-    # decision in 10b. Upgrade path: close the root from an ASGI middleware, or
-    # hand Starlette a wrapper object that owns closing the generator.
+    # Finding 30, and the whole of it is these three lines.
+    #
+    # A browser that disconnects mid-answer used to leave this generator
+    # abandoned rather than closed — suspended at a `yield` forever — and three
+    # things followed from that one cause: the answer was never saved, the trace
+    # stayed "running" in the dashboard, and the model's stream stayed open and
+    # billable until the garbage collector happened to reach it.
+    #
+    # So the generator is named instead of passed anonymously, and its `close`
+    # is handed to the middleware that owns the end of this request.
+    # `close_on_disconnect` calls it in a `finally`, which runs whether the
+    # request ended normally or died — and closing raises `GeneratorExit` inside
+    # `generate`, which is what finally lets its own `finally` block run.
+    #
+    # A `BackgroundTask` was the obvious alternative and does not work: read
+    # from the installed Starlette, `StreamingResponse.__call__` raises
+    # `ClientDisconnect` on the ASGI 2.4+ path and never reaches
+    # `self.background()`. It would have fired on one code path and silently not
+    # on the other.
+    stream = generate()
+    http_request.scope.get("state", {}).setdefault("stream_cleanup", []).append(
+        stream.close
+    )
+
     return StreamingResponse(
-        generate(),
+        stream,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -825,4 +962,86 @@ if __name__ == "__main__":
     # handler exists to prevent.
     assert rendered, "the trace must still record that it failed"
 
-    print("OK - trace errors: ours pass through whole, libraries reduced to a class name")
+    # --- Finding 29: the right sentence for the right failure ----------------
+    #
+    # Order first, because it is the part that breaks silently. Both of these
+    # subclass BadRequestError, so a mapping in the wrong order would answer
+    # every one of them with the generic line and nothing would look wrong.
+    # The provider's text is a sentinel, not plausible English. A realistic
+    # message can share words with our own copy by coincidence, and then the
+    # leak check below passes or fails for reasons that have nothing to do with
+    # leaking — which is how a test starts lying.
+    LEAK = "PROVIDER-DETAIL-b3f9"
+
+    context = litellm.ContextWindowExceededError(
+        message=LEAK, model="gpt-5.4-nano", llm_provider="openai"
+    )
+    _, detail = _stream_failure(context)
+    assert "too long for the model" in detail, detail
+    assert "Please try again" not in detail, (
+        "an over-long conversation was told to retry, which cannot help"
+    )
+
+    rate_limited = litellm.RateLimitError(
+        message=LEAK, model="m", llm_provider="openai"
+    )
+    _, busy = _stream_failure(rate_limited)
+    assert "busy" in busy, busy
+
+    bad_credentials = litellm.AuthenticationError(
+        message=LEAK, model="m", llm_provider="openai"
+    )
+    _, bad_key = _stream_failure(bad_credentials)
+    assert "our problem" in bad_key, bad_key
+
+    # Nothing may quote the provider. These messages go to a browser, and a
+    # provider's text can carry the request that produced it.
+    for exc in (context, rate_limited, bad_credentials):
+        _, shown = _stream_failure(exc)
+        assert LEAK not in shown, shown
+
+    # An unrecognised failure still says something.
+    label, generic = _stream_failure(RuntimeError("something new"))
+    assert generic == "The answer stopped early. Please try again."
+    assert label == "Generation failed"
+    assert "something new" not in generic
+
+    # --- Finding 30: closing an abandoned generator runs its finally ---------
+    #
+    # The whole fix rests on two language facts. Assert them rather than trust
+    # them, because if either is wrong the middleware runs and achieves nothing.
+    cleaned: list[str] = []
+
+    def _streamer():
+        try:
+            yield "first"
+            yield "second"
+        except Exception:
+            # Must NOT catch the close. `generate()` has a handler of exactly
+            # this shape, and if GeneratorExit were an Exception the disconnect
+            # would be misreported as a provider failure.
+            cleaned.append("wrongly caught")
+            raise
+        finally:
+            cleaned.append("cleaned up")
+
+    gen = _streamer()
+    assert next(gen) == "first"
+    gen.close()
+    assert cleaned == ["cleaned up"], cleaned
+    assert not issubclass(GeneratorExit, Exception), (
+        "GeneratorExit is an Exception here — `except Exception` in generate() "
+        "would swallow the close and report a disconnect as a provider failure"
+    )
+
+    # Closing twice, and closing something already finished, must both be safe:
+    # the middleware cannot know which happened.
+    gen.close()
+    done = _streamer()
+    list(done)
+    done.close()
+
+    print(
+        "OK - trace errors: ours pass through whole, libraries reduced to a class name; "
+        "stream failures mapped by cause; closing an abandoned generator runs its finally"
+    )

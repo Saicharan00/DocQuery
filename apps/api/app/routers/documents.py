@@ -914,13 +914,28 @@ def get_chunk_image(
     # hour but must not let any shared cache do the same.
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    # The same ticket `ingest_step` takes, and the reason is finding 21: a step
+    # uploads its JPEG *before* inserting the row that names it, so a delete
+    # running alongside one could remove every object it knew about and then
+    # have a fresh, unreferenced file land behind it — unreachable by any future
+    # delete, and billed for as long as the bucket exists. Holding the same
+    # claim means a delete and a step cannot overlap at all, so there is no
+    # window for that upload to land in.
+    #
+    # A caller mid-ingest gets the claim's 409 rather than a delete. That is
+    # honest — the document really is busy — and a step is bounded by
+    # STEP_BUDGET_SECONDS, so the wait is seconds, not minutes.
+    dependencies=[Depends(claim_ingest_step)],
+)
 async def delete_document(
-    _user_id: CurrentUser,
+    user_id: CurrentUser,
     supabase: SupabaseClient,
     document_id: UUID,
 ) -> None:
-    """Delete a document's file and its row.
+    """Delete a document's file, its pictures, and its row.
 
     Storage object first, row second. If storage deletion fails, the row
     survives and you can retry. The other order would leave a file with nothing
@@ -957,19 +972,28 @@ async def delete_document(
     # The images Day 6b cropped out of this document. They are separate Storage
     # objects with nothing cascading to them, so without this every delete
     # leaves its pictures in the bucket forever — paid for, and listed nowhere.
-    # Bounded by MAX_IMAGES_PER_DOCUMENT, and RLS scopes the select as always.
     #
-    # ponytail: this finds the images that made it into a row. A step that died
-    # between uploading a JPEG and inserting its row leaves that one file
-    # behind. Listing the folder prefix would catch those too — revisit if
-    # orphans ever actually show up.
+    # Asked of Storage rather than of the `chunks` table, which is the second
+    # half of finding 21. The old query found the images that made it into a
+    # row; a step killed between uploading a JPEG and inserting that row leaves
+    # a file no row has ever named, and no query could ever find it. The folder
+    # is the truth about what exists, so the folder is what gets listed — and
+    # this now cleans up orphans left by every such step before today.
+    #
+    # `img-N.jpg` all live under `{user}/{document}/`, while the uploaded file
+    # itself sits one level up as `{user}/{document}.{ext}`, so it is added
+    # separately. `foldername(name)[1]` is still the user id either way, which
+    # is what the storage policy in 001_init.sql checks.
+    image_prefix = f"{user_id}/{document_id}"
+
     try:
-        stored = (
-            supabase.table("chunks")
-            .select("image_path")
-            .eq("document_id", str(document_id))
-            .not_.is_("image_path", "null")
-            .execute()
+        stored = supabase.storage.from_(BUCKET).list(
+            image_prefix,
+            # Above MAX_IMAGES_PER_DOCUMENT with room for orphans. The default
+            # is 100, which a 75-image document plus strays could reach — and a
+            # truncated listing here fails the exact way this fix exists to
+            # prevent, by leaving files behind and reporting success.
+            {"limit": 1000},
         )
     except Exception as exc:
         logger.exception("Could not list image files for document %s", document_id)
@@ -978,7 +1002,7 @@ async def delete_document(
             detail="Could not delete the document. Please try again.",
         ) from exc
 
-    paths = [file_path] + [row["image_path"] for row in stored.data]
+    paths = [file_path] + [f"{image_prefix}/{obj['name']}" for obj in stored]
 
     try:
         supabase.storage.from_(BUCKET).remove(paths)
