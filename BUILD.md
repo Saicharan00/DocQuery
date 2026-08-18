@@ -625,6 +625,30 @@ Free if obeyed now. Costs a full rewrite of all 18 questions if remembered later
    - **2–3 multi-turn questions** — follow-ups that only make sense after a previous turn.
      These exist to measure the Day 9 rewriting work. Expect them to fail before it.
    - **1 figure-only question**, answerable solely from an image in the technical document.
+
+     > **This question now has a known suspect, found 2026-08-14. Expect it to fail.**
+     >
+     > Figures are embedded from **pixels alone**. `documents.py` stores an image chunk's
+     > text as `[Image from page N]` and nothing else — no caption, no figure number — and
+     > `ingestion.py` says so outright: *"The label is never what gets embedded, the picture
+     > is."* The words that tell Figure 40 apart from Figure 17 live in a **separate text
+     > chunk** with no link back to the picture.
+     >
+     > Technical block diagrams look alike — boxes, arrows, labels too small to read at the
+     > render DPI — so their vectors cluster and the ranking between them is close to a coin
+     > flip. Day 10a measured image similarities in a **0.18–0.25 band**, which is what that
+     > looks like from the outside. Hand-testing on 2026-08-14 got roughly **1 usable figure
+     > in 6 or 7** — an impression, not a measurement, which is exactly why it is written
+     > here as a question to score rather than as a number to quote.
+     >
+     > **Ruled out:** the 75-image cap. That document has 69 image chunks, last image on page
+     > 83, so nothing was lost to the cap. Do not re-run that theory.
+     >
+     > **Not a bug:** the embedding calls are correct — `input_type="image"` for pictures,
+     > `search_document` for stored text, `search_query` for the question.
+     >
+     > Deliberately **not fixed before this measurement exists**, so Day 11.5 can carry a
+     > real before/after row. The candidates are in the Day 11.5 list below.
 3. `scripts/eval.py` — loads the pairs, runs the pipeline by importing `services/rag.py`
    directly (it is plain functions with no FastAPI in it, precisely so this is possible),
    across all three models from Day 7. Output: `eval_results.md`.
@@ -697,6 +721,7 @@ the security boundary — this is the difference between claiming it and proving
 |---|---|---|---|
 | **Re-ranking** | Retrieve k=20 by vector, send those 20 + the question to Cohere's rerank endpoint, keep the top 5 | The standard production fix for naive vector RAG, and the `COHERE_API_KEY` is already in `.env`. Verify the current rerank model ID before use. | 1 afternoon |
 | **Hybrid search** | Postgres `tsvector` + `websearch_to_tsquery`, fused with vector results via Reciprocal Rank Fusion (~5 lines of SQL) | Dense retrieval degrades on **exact-match tokens** — identifiers, surnames, error codes. Postgres does full-text natively, so this is one migration and zero new dependencies. Only measurable because step 1 put a technical document in the corpus. | half day |
+| **Figure captions in the index** | Either widen each figure's crop downward to take in its caption line before rendering, so the picture itself carries the words "Figure 40 — Wi-Fi module"; or store a sibling **text** chunk per figure holding the caption plus nearby text and pointing at the same `image_path`. Hybrid search above only helps once one of these puts real words in `content`. | Figures are embedded from **pixels alone** — see the note on Day 11's figure-only question. Block diagrams look alike, so their vectors cluster and the choice between them is close to random. The crop is the smaller change; the sibling chunk is the more reliable one, but it needs `to_sources`/`build_messages` to dedupe so one figure is not cited twice. **Either way it needs a re-ingest, which re-spends embedding calls — a cost decision, not a free one.** | half day + re-ingest |
 | **Prompt injection test + defense** | Upload a PDF containing an instruction aimed at the model. Show whether it obeys. Defend (delimiters, system prompt naming retrieved text as untrusted **data**), re-measure. | This app's input is *arbitrary files uploaded by strangers* — the textbook injection surface. Even "it partially works, here's the residual risk" is a more honest security answer than most candidates give. | 2h |
 | **Abstention threshold** | Below a similarity cutoff, skip the LLM entirely and return "I don't see this in your documents" | A product improvement, not just a metric: fewer confident wrong answers, and it saves money by not calling the model at all. **Day 11's data sets the number** — that's why it isn't a guess made on Day 7. | 30 min |
 
