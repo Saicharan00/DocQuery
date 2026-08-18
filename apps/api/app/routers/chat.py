@@ -402,6 +402,43 @@ def _event(name: str, payload: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
 
 
+def _safe_trace_error(exc: BaseException) -> str:
+    """What may be written onto a trace that could later be shared publicly.
+
+    A trace is shareable — the README is meant to link one — which is why the
+    Clerk id is hashed with `tracing.anon` further up rather than sent raw. This
+    field was the hole in that reasoning. It used to be `repr(exc)`, defended on
+    the grounds that an `HTTPException`'s repr is only a status and a message we
+    wrote ourselves. True for the three `raise HTTPException` paths, but not for
+    everything reaching that handler: `rag.embed`, `load_images`,
+    `build_messages`, `to_sources` and the conversation writes are all unwrapped,
+    so a supabase or httpx repr can land here carrying the request it just tried
+    to make.
+
+    So: our own text passes through, since it was written to be read by users.
+    Anything else is reduced to its class name, which still says what broke
+    without quoting the failing call back at a public page. The detail is not
+    lost — it goes to the server log, which nobody can share by accident.
+
+    No key has been found that could leak here (supabase-py sends credentials as
+    headers, not in messages), so this is about request detail rather than
+    secrets. That is worth fixing on a page meant to be public, and not worth
+    pretending is worse than it is.
+    """
+    if isinstance(exc, HTTPException):
+        return f"HTTPException {exc.status_code}: {exc.detail}"
+    return type(exc).__name__
+
+
+# In plain English: when something goes wrong we write the reason onto the
+# record of this question. That record can be shared with anyone. So we write
+# our own error messages out in full — we wrote them for people to read — but
+# for anything thrown by a library we write down only what *kind* of error it
+# was, not its description, because those descriptions tend to quote the
+# database query or web request that failed. The full text still goes to the
+# private server log.
+
+
 # Deliberately `def`, not `async def`, exactly like `ingest_step`. Everything in
 # here is a blocking network call — Cohere, Supabase, then the model provider
 # token by token. Inside an `async def` those would freeze the event loop and
@@ -468,9 +505,12 @@ def chat(
     # The try/except exists because a hand-made root is closed by nobody. The
     # three `raise HTTPException` paths below would otherwise leave a run marked
     # "running" in the UI forever, which reads as a hung request — worse than no
-    # trace at all. One handler, not three: `repr()` on an HTTPException already
-    # prints its status and detail, and this text goes to our own dashboard, not
-    # to a browser.
+    # trace at all. One handler, not three.
+    #
+    # It used to write `repr(exc)`, reasoning that an HTTPException's repr is
+    # just a status and a message of ours, bound for our own dashboard. Both
+    # halves were too generous: most of the block is unwrapped library calls, and
+    # a trace is shareable by design. See `_safe_trace_error`.
     try:
         with tracing.parent(root):
             # Day 9b. Deliberately a plain select rather than
@@ -564,7 +604,14 @@ def chat(
                     _discard_conversation(supabase, conversation_id)
                 raise
     except Exception as exc:
-        tracing.finish_root(root, error=repr(exc))
+        # Logged before it is trimmed, and only when it is not one of ours: an
+        # `HTTPException` raised above is a decision, not a defect, and its text
+        # survives into the trace anyway. Everything else loses its message on
+        # the way to a shareable page, so this is the one place that detail is
+        # kept — in the server log, which is private.
+        if not isinstance(exc, HTTPException):
+            logger.exception("Chat setup failed before the response started")
+        tracing.finish_root(root, error=_safe_trace_error(exc))
         raise
 
     # In plain English, the two lines around all of that: open one record for
@@ -750,3 +797,32 @@ def chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+if __name__ == "__main__":
+    # Ours passes through whole: a status and a sentence written to be read by
+    # the person who hit the error.
+    ours = HTTPException(status_code=400, detail="No documents to search yet.")
+    assert _safe_trace_error(ours) == "HTTPException 400: No documents to search yet."
+
+    # A library's does not. The message is exactly the part that quotes the
+    # failing request back at a page that may end up public — which is the whole
+    # reason the Clerk id is hashed a few dozen lines above.
+    class _PostgrestError(Exception):
+        pass
+
+    leaky = _PostgrestError(
+        "relation chunks: SELECT embedding FROM chunks WHERE user_id='user_3ABCdef'"
+    )
+    rendered = _safe_trace_error(leaky)
+
+    assert rendered == "_PostgrestError", rendered
+    assert "user_3ABCdef" not in rendered, "a Clerk id reached a shareable trace"
+    assert "SELECT" not in rendered, "a query reached a shareable trace"
+
+    # Still says *something*. An empty error field would close the run without
+    # recording that anything went wrong, which is the failure this whole
+    # handler exists to prevent.
+    assert rendered, "the trace must still record that it failed"
+
+    print("OK - trace errors: ours pass through whole, libraries reduced to a class name")
