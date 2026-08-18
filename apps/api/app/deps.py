@@ -218,7 +218,10 @@ async def get_current_user(
             key,
             algorithms=["RS256"],
             issuer=settings.clerk_jwt_issuer,
-            # Clerk session tokens carry `azp`, not `aud`.
+            # Clerk session tokens carry `azp`, not `aud`, so there is no
+            # audience to verify. `_check_authorized_party` below is the
+            # substitute — without it, disabling this check leaves nothing at
+            # all asserting the token was minted for *this* application.
             options={"verify_aud": False},
         )
     except ExpiredSignatureError as exc:
@@ -227,11 +230,64 @@ async def get_current_user(
         # Deliberately vague: never echo token contents back to the caller.
         raise _unauthorized("Token failed verification.") from exc
 
+    _check_authorized_party(claims, settings)
+
     user_id = claims.get("sub")
     if not user_id:
         raise _unauthorized("Token is missing the sub claim.")
 
     return str(user_id)
+
+
+def _check_authorized_party(claims: dict, settings: Settings) -> None:
+    """Refuse a token Clerk minted for somebody else's front end.
+
+    Everything above this proves the token is *genuine* — signed by Clerk, not
+    expired, issued by our instance. None of it proves it was meant for **us**.
+
+    Clerk sets `azp` to the origin that asked for the token. A publishable key
+    is public by design, so a page at `evil.example` can run Clerk with our key;
+    a signed-in visitor who lands there gets a real, correctly-signed token for
+    their real account, with `azp` naming that page. Sent here, every check
+    above passes and the holder reads that user's documents.
+
+    CORS does not cover this and was never going to. It is a rule browsers
+    volunteer to follow about *replies*, enforced by the browser, so it stops a
+    script reading our response — it stops nothing that speaks HTTP directly,
+    and by then the request has already run. This is the server-side half Clerk
+    documents as the substitute for the `aud` check we correctly disable above.
+
+    Reused from `cors_origins` rather than given a key of its own: that setting
+    already means "the browser origins allowed to call this API", which is
+    exactly the question being asked here. A second list would be a second thing
+    to keep in step, and the failure of forgetting would be silent.
+    """
+    azp = claims.get("azp")
+
+    if azp is None:
+        # Enforced only when present, and that is not a loophole to be closed by
+        # rejecting instead. `azp` is written by Clerk, never by the caller, so
+        # its absence is not something an attacker can arrange — it means a
+        # token shape that carries no origin at all (a JWT template, a
+        # machine-to-machine token). Refusing those outright would be an outage
+        # for a threat that cannot reach this branch.
+        logger.info("Token carries no azp claim; origin not checked")
+        return
+
+    if azp not in settings.cors_origin_list:
+        # Logged, because this is the one failure here that means somebody is
+        # doing something rather than something being misconfigured — and the
+        # value is Clerk's, not the caller's free text. The user is told only
+        # that it was refused.
+        logger.warning("Rejected token minted for unauthorised origin %r", azp)
+        raise _unauthorized("Token was not issued for this application.")
+
+    # In plain English: the token is real, but "real" is not the same as "meant
+    # for us". Clerk stamps each token with the website that asked for it, and
+    # this checks that stamp against the list of websites we allow. A token
+    # someone obtained through a copycat site is genuine and belongs to a real
+    # account — it just was not issued for this app, and that is enough to turn
+    # it away.
 
 
 CurrentUser = Annotated[str, Depends(get_current_user)]
@@ -304,3 +360,40 @@ def get_supabase_client(
 
 
 SupabaseClient = Annotated[Client, Depends(get_supabase_client)]
+
+
+# ---------------------------------------------------------------------------
+# Self-check
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # The origin check, which is the one piece of logic in this file that can be
+    # exercised without a token, a network or a database. Needs no API key:
+    #   apps\api> .venv\Scripts\python.exe -m app.deps
+    from types import SimpleNamespace
+
+    allowed = SimpleNamespace(
+        cors_origin_list=["https://doc-query-lac.vercel.app", "http://localhost:3000"]
+    )
+
+    # Our own front ends must pass, or the whole app is locked out — the
+    # failure mode that makes an origin check dangerous to add carelessly.
+    _check_authorized_party({"azp": "https://doc-query-lac.vercel.app"}, allowed)
+    _check_authorized_party({"azp": "http://localhost:3000"}, allowed)
+
+    # No azp at all: allowed by design, and the reasoning is in the function.
+    _check_authorized_party({}, allowed)
+
+    # The whole point. A token minted for somebody else's page is genuine,
+    # correctly signed, and belongs to a real user — and must still be refused.
+    for foreign in ("https://evil.example", "http://localhost:3001", ""):
+        try:
+            _check_authorized_party({"azp": foreign}, allowed)
+        except HTTPException as exc:
+            assert exc.status_code == 401, f"{foreign!r} refused with {exc.status_code}, not 401"
+        else:
+            raise AssertionError(
+                f"a token minted for {foreign!r} was accepted — this is the finding-27 hole"
+            )
+
+    print("OK - our origins pass, a foreign azp is refused, a missing azp is allowed")

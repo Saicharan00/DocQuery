@@ -63,6 +63,18 @@ STEP_BUDGET_SECONDS = 45
 # write, the status update, and any clock difference between us and Supabase.
 TOKEN_SAFETY_MARGIN_SECONDS = 5
 
+# Below this much usable budget, refuse the step before spending anything. One
+# step must have room to download the file, parse it (rendering every figure),
+# embed a batch and write it — do less than all of that and the money is spent
+# for nothing, because a step that saves no chunks leaves the browser to repeat
+# it.
+#
+# The twin of `MIN_ANSWER_BUDGET_SECONDS` in chat.py, and it carries the same
+# warning: it must stay well below `STEP_BUDGET_SECONDS`. Clerk's session tokens
+# live 60 seconds, so a floor set anywhere near the 45s ceiling would reject a
+# brand-new token as readily as a dying one, and ingestion would 401 forever.
+MIN_STEP_BUDGET_SECONDS = 20
+
 
 # Which documents currently have a step running. `ingest_step` had a `ready`
 # check but nothing stopping two of them overlapping, and two steps read the
@@ -516,6 +528,33 @@ def ingest_step(
         STEP_BUDGET_SECONDS,
         expires_at - time.time() - TOKEN_SAFETY_MARGIN_SECONDS,
     )
+
+    # Before a cent is spent, and before the heavy CPU work: is there time to
+    # finish anything? The loop below consults `budget` only *after* a batch has
+    # been embedded and written, which meant a step arriving on a nearly-dead
+    # token still paid in full — download, parse, every figure rendered, and one
+    # Cohere call — and then lost the write to `"exp" claim timestamp check
+    # failed`. Nothing was saved, so the browser came back and bought the same
+    # batch again.
+    #
+    # A 401 rather than an empty step: `fetchWithToken` in
+    # apps/web/src/lib/api.ts already answers one by fetching a fresh token and
+    # replaying the request, so this costs a round trip and shows nothing on
+    # screen. An empty `IngestStepOut` is not even available here — its
+    # `chunks_total` is only knowable after the parse this guard exists to skip.
+    #
+    # The floor has to clear a download, a parse with every image rendered, one
+    # embedding call and its insert. It must also stay well under a fresh
+    # token's usable life — Clerk's session tokens live 60s, so anything near
+    # `STEP_BUDGET_SECONDS` would refuse brand-new tokens too and wedge
+    # ingestion permanently. That is the trap `chat.py` documents at
+    # MIN_ANSWER_BUDGET_SECONDS, and it is the same trap here.
+    if budget < MIN_STEP_BUDGET_SECONDS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session token is about to expire. Please try again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
         found = (
@@ -1002,4 +1041,32 @@ if __name__ == "__main__":
     # it is the one that keeps a long ingest resumable rather than failed.
     assert issubclass(TooManyRequestsError, TRANSIENT_ERRORS), "rate limiting regressed to fatal"
 
-    print(f"OK - {len(TRANSIENT_ERRORS)} transient error classes, fatal ones excluded")
+    # The step budget floor. Both halves matter and they pull in opposite
+    # directions, which is exactly why this is worth asserting rather than
+    # eyeballing: too low and a step pays for work it cannot finish, too high
+    # and it refuses tokens that were perfectly good and ingestion never runs
+    # again.
+    CLERK_SESSION_TOKEN_SECONDS = 60
+
+    def budget_for(seconds_left: float) -> float:
+        """The same arithmetic as `ingest_step`, with the clock passed in."""
+        return min(
+            STEP_BUDGET_SECONDS,
+            seconds_left - TOKEN_SAFETY_MARGIN_SECONDS,
+        )
+
+    assert budget_for(CLERK_SESSION_TOKEN_SECONDS) >= MIN_STEP_BUDGET_SECONDS, (
+        "a brand-new Clerk token would be refused — ingestion would 401 forever, "
+        "which is the trap chat.py's MIN_ANSWER_BUDGET_SECONDS documents"
+    )
+    assert budget_for(8) < MIN_STEP_BUDGET_SECONDS, (
+        "a nearly-dead token would still be allowed to embed a batch it cannot save"
+    )
+    assert MIN_STEP_BUDGET_SECONDS < STEP_BUDGET_SECONDS, (
+        "the floor must sit below the ceiling or no step can ever run"
+    )
+
+    print(
+        f"OK - {len(TRANSIENT_ERRORS)} transient error classes, fatal ones excluded; "
+        f"step floor {MIN_STEP_BUDGET_SECONDS}s admits a fresh token, refuses a dying one"
+    )
