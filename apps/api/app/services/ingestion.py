@@ -20,6 +20,7 @@ import io
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -44,6 +45,65 @@ EMBED_BATCH_SIZE = 96
 # is 20MB of them combined. Eight crops at roughly 100KB each leaves an
 # enormous margin, and a smaller batch also loses less work to a rate limit.
 IMAGE_EMBED_BATCH_SIZE = 8
+
+# ...and the margin was assumed rather than enforced, which is the whole of
+# finding 20. "Roughly 100KB each" describes a figure cropped out of a text
+# page; `MAX_IMAGE_PIXELS` below permits a crop twenty times that, and a scanned
+# document is one full-page image per page. Base64 then adds a third. Eight
+# scanned pages is 11-16MB, and the request is refused for its size.
+#
+# What made that a permanent failure rather than a bad minute: a size rejection
+# is not `TooManyRequestsError`, so `ingest_step`'s transient list does not
+# catch it and the document is marked `failed` — and batching was a fixed
+# stride, so every retry rebuilt the identical oversized batch and failed
+# identically. A scanned PDF could never be ingested at all.
+#
+# 16MB rather than 20: the ceiling is on the whole request, and the JSON
+# envelope, the field names and the data-URI prefixes are all counted by the
+# server and none of them are image bytes.
+MAX_IMAGE_REQUEST_BYTES = 16 * 1024 * 1024
+
+# The prefix Cohere requires on each image. Counted because it is part of the
+# string that gets sent, and 8 of them is not nothing next to a byte ceiling.
+_DATA_URI_PREFIX = "data:image/jpeg;base64,"
+
+
+def _image_batches(jpegs: list[bytes]) -> Iterator[list[bytes]]:
+    """Group pictures into requests that fit, by size as well as by count.
+
+    Yields at least one image per batch even when that image alone is over the
+    ceiling. A picture cannot be split, so the alternative is an empty batch and
+    an infinite loop; sending it alone at least earns a specific error about
+    that one file instead of dragging seven innocent pages down with it.
+    """
+    batch: list[bytes] = []
+    batch_bytes = 0
+
+    for jpeg in jpegs:
+        # Base64 is 4 characters per 3 bytes, rounded up. Computed rather than
+        # encoded: encoding here just to measure would hold a second copy of
+        # every picture in memory, which is the other way to fall over.
+        encoded = 4 * ((len(jpeg) + 2) // 3) + len(_DATA_URI_PREFIX)
+
+        if batch and (
+            len(batch) >= IMAGE_EMBED_BATCH_SIZE
+            or batch_bytes + encoded > MAX_IMAGE_REQUEST_BYTES
+        ):
+            yield batch
+            batch, batch_bytes = [], 0
+
+        batch.append(jpeg)
+        batch_bytes += encoded
+
+    if batch:
+        yield batch
+
+    # In plain English: walk the pictures one at a time, adding each to the
+    # current pile. Before adding, check whether it would make the pile too many
+    # or too heavy — if so, send the pile as it stands and start a fresh one.
+    # The `batch and` at the front is what stops an over-sized picture producing
+    # an empty pile forever: a pile that is still empty always accepts the next
+    # picture, whatever it weighs.
 
 # CLAUDE.md locks these in: 800 tokens with 100 of overlap. The overlap is why a
 # sentence split across two chunks is still findable — both copies contain it.
@@ -588,8 +648,12 @@ def embed_images(jpegs: list[bytes]) -> list[list[float]]:
     """
     vectors: list[list[float]] = []
 
-    for start in range(0, len(jpegs), IMAGE_EMBED_BATCH_SIZE):
-        batch = jpegs[start : start + IMAGE_EMBED_BATCH_SIZE]
+    # Grouped by weight as well as by count — see `_image_batches` and the
+    # note on MAX_IMAGE_REQUEST_BYTES. The caller already hands us no more than
+    # IMAGE_EMBED_BATCH_SIZE at a time, so on ordinary figures this splits
+    # nothing; it exists for the scanned page, where eight crops are megabytes
+    # each and the request would be refused for its size.
+    for batch in _image_batches(jpegs):
         response = _cohere().embed(
             model=EMBED_MODEL,
             images=[
@@ -704,8 +768,39 @@ if __name__ == "__main__":
         "the repeated logo was no longer reported as furniture"
     )
 
+    # Finding 20: batches must fit by weight, not only by count. The failure
+    # this prevents is not a slow request — it is a document that can never be
+    # ingested at all, because a size rejection marks it `failed` and the next
+    # attempt rebuilds the identical batch.
+    def encoded_size(group: list[bytes]) -> int:
+        return sum(4 * ((len(j) + 2) // 3) + len(_DATA_URI_PREFIX) for j in group)
+
+    # Ordinary figures: nothing should be split, or every ingest pays extra
+    # round trips for a problem it does not have.
+    small = [b"x" * 100_000] * 8
+    assert list(_image_batches(small)) == [small], (
+        "eight ordinary crops were split — this batching should be invisible to them"
+    )
+
+    # Scanned pages: eight of these is the 11-16MB request that gets refused.
+    scanned = [b"x" * 3_000_000] * 8
+    groups = list(_image_batches(scanned))
+    assert len(groups) > 1, "an oversized batch was not split — finding 20 is still open"
+    assert sum(len(g) for g in groups) == len(scanned), "images were lost or duplicated"
+    for group in groups:
+        assert encoded_size(group) <= MAX_IMAGE_REQUEST_BYTES, (
+            "a batch is still over the request ceiling"
+        )
+
+    # A single picture bigger than the whole ceiling must still go, alone. The
+    # alternative is an empty batch, which would loop forever.
+    huge = [b"x" * (MAX_IMAGE_REQUEST_BYTES * 2)]
+    assert list(_image_batches(huge)) == [huge], "an over-ceiling image must still be sent alone"
+    assert list(_image_batches([])) == [], "an empty list must yield no requests"
+
     sizes = ", ".join(f"{len(region.jpeg) // 1024}KB" for region in first_images)
     print(
         f"OK — {len(first_images)} images, deterministic, all on page 1 ({sizes}); "
-        f"deck kept {len(deck_images)}/6 charts; logo still filtered"
+        f"deck kept {len(deck_images)}/6 charts; logo still filtered; "
+        f"8 scanned pages split into {len(groups)} requests, all under the ceiling"
     )
