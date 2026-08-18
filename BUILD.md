@@ -511,6 +511,22 @@ nothing until `GET /conversations/{id}/messages` exists. Day 9 moves the file in
    - Auth: token expired → clean re-auth flow
 8. No `console.error` or `print(e)` left as the only response to a failure.
 
+> **The LLM line above was the last of step 7 still outstanding, and it closed on
+> 2026-08-18** (audit finding 29). Every mid-stream failure had collapsed into one
+> sentence — *"The answer stopped early. Please try again."* — which is advice, and
+> for three of the four causes it is the **wrong** advice: retrying makes a rate
+> limit worse, cannot help a revoked key, and fails identically on a conversation
+> that has outgrown the model's context. `_STREAM_FAILURES` in `chat.py` now picks
+> the sentence from the cause.
+>
+> Two details worth keeping. The list is **ordered**, because
+> `ContextWindowExceededError` and `ContentPolicyViolationError` both subclass
+> `BadRequestError` — checked against the installed litellm — so a general entry
+> above them would swallow both and nothing would look wrong. And no message
+> interpolates the provider's text, for the reason `_safe_trace_error` exists: a
+> provider message can quote the request that produced it, and this string goes to
+> a browser.
+
 ### Done when
 
 - [x] Every chat message produces a visible LangSmith trace with the full pipeline breakdown.
@@ -548,11 +564,24 @@ normally with tracing switched off.
 
 **Not verified, and honest about it:**
 
-- **Client disconnect leaves the trace open.** Starlette's `iterate_in_threadpool`
-  has no `finally`, so an abandoned generator is never closed. One cause, three
-  symptoms: no `_save_exchange`, no closed trace, and a model stream left open and
-  billable. **Deferred to 10b**, where it lands with the `_save_exchange` decision
-  it shares a fix with.
+- ~~**Client disconnect leaves the trace open.**~~ **Fixed 2026-08-18** (audit
+  finding 30). Starlette's `iterate_in_threadpool` has no `finally`, so an
+  abandoned generator was never closed — one cause, three symptoms: no saved
+  answer, no closed trace, and a model stream left open and billable until the
+  garbage collector reached it.
+
+  `CloseAbandonedStreams` in `main.py` now calls `.close()` on the response
+  generator from a `finally` around the whole request, which raises
+  `GeneratorExit` inside it and lets its own `finally` run at last. That block
+  now also **saves the partial answer**, on the same reasoning the cut-short
+  path already used: half an answer you can find again beats a whole one that
+  vanished.
+
+  **A `BackgroundTask` was tried first and rejected, from reading the installed
+  Starlette rather than guessing.** `StreamingResponse.__call__` has two exit
+  paths, and on the ASGI 2.4+ one it raises `ClientDisconnect` and never reaches
+  `self.background()` — so that fix would have worked on one path and silently
+  not on the other. A middleware's `finally` covers both.
 - **The zero-documents 400 path** — needs an account with nothing uploaded.
 - **Railway**, and therefore the public trace URL.
 
