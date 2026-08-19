@@ -15,12 +15,8 @@ references a real secrets file — anything matching `.env*` except the
 explicitly-safe placeholder templates (`.env.example`, `.env.sample`,
 `.env.template`).
 
-**Why I built it:** I'm working with an AI assistant that has real file
-system and shell access. Telling it in `CLAUDE.md` "never read `.env`" is
-just a prompt-level instruction — it can be forgotten, overridden by a badly
-phrased request, or slip through in a multi-step task. A hook is enforced by
-the harness itself, outside the model's control, so it's a hard technical
-guarantee instead of a hope.
+**Why I built it:** I'm working with an AI assistant that has real file system and shell access. Telling it in `CLAUDE.md` "never read `.env`" is just a prompt-level instruction — it can be forgotten, overridden by a badly
+phrased request, or slip through in a multi-step task. A hook is enforced by the harness itself, outside the model's control, so it's a hard technical guarantee instead of a hope.
 
 **What it achieves:**
 - Real API keys (OpenAI, Anthropic, Clerk, Supabase service role, etc.) can never enter the conversation transcript, get echoed back to me, or get logged — even if I (or a future prompt injection from some pasted content) accidentally ask for it.
