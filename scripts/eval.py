@@ -23,10 +23,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+# The test corpus is Paul Graham essays and an arXiv paper — both routinely
+# contain non-ASCII text ("Erdős"). Windows PowerShell's console defaults to
+# cp1252, which can't encode that and crashes on the first `print`. UTF-8 can
+# encode anything these files contain, so this is a plain bug fix, not a
+# platform-specific special case.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
 
@@ -59,6 +68,35 @@ MIN_SECONDS_REMAINING = 20
 # fine and is the entire point — it's what fits 18 questions inside one
 # ~60s-lived token instead of running them one at a time.
 MAX_WORKERS = 8
+
+# `eval_qa.json`'s `source_doc` names the essay by its original filename
+# (`alien.html`); the test account stores it under the upload's own generic
+# name (`Paul Graham-4.txt`). Confirmed by reading the four uploaded .txt
+# files directly — the account's own document names give no clue which is
+# which. Matched case-insensitively below: the corpus has "paul graham-1.txt"
+# lowercase but "Paul Graham-2.txt" capitalized, an inconsistency from upload.
+SOURCE_DOC_TO_DOCUMENT_NAME = {
+    "hubs.html": "paul graham-1.txt",
+    "winc.html": "paul graham-2.txt",
+    "do.html": "paul graham-3.txt",
+    "alien.html": "paul graham-4.txt",
+    "attention_is_all_you_need.pdf": "attention is all you need.pdf",
+}
+
+# Common words dropped before scoring a chunk against a question — without
+# this, every chunk in English ties on "the", "and", "is" and the ranking
+# says nothing.
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for", "with",
+    "that", "this", "what", "which", "does", "do", "did", "is", "are", "was",
+    "were", "how", "why", "who", "it", "its", "as", "by", "at", "from", "says",
+    "say", "said", "he", "she", "they", "them", "his", "her", "their", "not",
+    "be", "been", "has", "have", "had", "if", "than", "then", "so", "also",
+    "into", "about", "over", "under", "out", "up", "down", "more", "most",
+    "some", "any", "all", "one", "two", "three", "you", "your", "we", "our",
+    "us", "can", "could", "would", "should", "will", "shall", "may", "might",
+    "these", "those", "such", "there", "here", "when", "where",
+}
 
 
 def _write_json_atomic(path: Path, data) -> None:
@@ -239,6 +277,126 @@ def cmd_retrieve(token: str) -> int:
     return 0
 
 
+def _keywords(text: str) -> set[str]:
+    """The significant words in `text`: lowercased, stopwords and short words
+    dropped. What's left is usually the words specific enough to a passage to
+    be worth matching on — "Wufoo", "Tampa" — rather than words every passage
+    shares.
+    """
+    tokens = re.findall(r"[a-z0-9']+", (text or "").lower())
+    return {token for token in tokens if len(token) > 2 and token not in STOPWORDS}
+
+
+def _score_chunk(chunk: dict, keywords: set[str]) -> int:
+    """How many of `keywords` actually appear in this chunk's text."""
+    return len(keywords & _keywords(chunk.get("content")))
+
+
+def cmd_resolve_hints() -> int:
+    """Phase 0: a human confirms which real chunk backs each question's answer.
+
+    Interactive by design (input() per question) — this is meant to be run
+    directly in your own terminal, not through me, same as `retrieve`.
+    """
+    if not CORPUS_PATH.exists():
+        print(f"{CORPUS_PATH.name} not found. Run `retrieve` first.")
+        return 1
+
+    corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    questions = json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))
+
+    todo = [q for q in questions if q["type"] != "adversarial" and not q.get("ground_truth_chunk_id")]
+    if not todo:
+        print("Every non-adversarial question already has a ground_truth_chunk_id.")
+        return 0
+
+    print(f"{len(todo)} question(s) to resolve. The 2 adversarial questions are skipped by design.\n")
+
+    resolved_this_run = 0
+    for position, question in enumerate(todo, start=1):
+        document_name = SOURCE_DOC_TO_DOCUMENT_NAME[question["source_doc"]]
+        scoped = [c for c in corpus if (c["document_name"] or "").lower() == document_name]
+        keywords = _keywords(
+            f"{question['question']} {question['ground_truth_answer']} {question['ground_truth_chunk_hint']}"
+        )
+
+        while True:
+            if question["type"] == "figure-only":
+                # An image chunk's stored "content" is just a label
+                # ("[Image from page 3]"), so it always scores 0 against
+                # real question keywords and would never reach a plain
+                # top-5 — the one case this eval set has of the right
+                # answer being unrankable by text at all. Image chunks go
+                # first, ordered by page since that's how a human would
+                # scan the source PDF; a few top-scoring text chunks ride
+                # along in case the real target is a caption, not a figure.
+                images = sorted(
+                    (c for c in scoped if c["chunk_type"] == "image"),
+                    key=lambda c: c.get("page_number") or 0,
+                )
+                texts = sorted(
+                    (c for c in scoped if c["chunk_type"] != "image"),
+                    key=lambda c: _score_chunk(c, keywords),
+                    reverse=True,
+                )[:3]
+                candidates = images + texts
+            else:
+                candidates = sorted(scoped, key=lambda c: _score_chunk(c, keywords), reverse=True)[:5]
+
+            print(f"--- [{position}/{len(todo)}] {question['id']} ({question['type']}) — {question['source_doc']} ---")
+            print(f"Q: {question['question']}")
+            print(f"A: {question['ground_truth_answer']}")
+            print(f"Hint: {question['ground_truth_chunk_hint']}\n")
+            for i, chunk in enumerate(candidates, start=1):
+                preview = (chunk.get("content") or "").replace("\n", " ")[:160]
+                print(
+                    f"  {i}) [score {_score_chunk(chunk, keywords)}] "
+                    f"chunk #{chunk['chunk_index']} ({chunk['chunk_type']}, page {chunk.get('page_number')})"
+                )
+                print(f"     {preview}")
+
+            answer = input(
+                '\nCorrect chunk number(s), e.g. "1" or "2,4" for multi-hop, '
+                '"search <word>" to re-rank, or "skip": '
+            ).strip()
+
+            if not answer or answer.lower() == "skip":
+                print("Skipped — will show again next run.\n")
+                break
+
+            if answer.lower().startswith("search "):
+                keywords = _keywords(answer[len("search ") :])
+                print()
+                continue
+
+            try:
+                indices = [int(token) for token in answer.split(",")]
+                selected = [candidates[i - 1]["id"] for i in indices]
+            except (ValueError, IndexError):
+                print(f"Could not read {answer!r} as candidate number(s). Try again.\n")
+                continue
+
+            question["ground_truth_chunk_id"] = selected
+            _write_json_atomic(EVAL_QA_PATH, questions)
+            resolved_this_run += 1
+            print(f"Saved. ground_truth_chunk_id = {selected}\n")
+            break
+
+    # In plain English, the loop above: for each question needing a ground
+    # truth, show its 5 best-guess chunks (ranked by how many of the
+    # question's distinctive words appear in each one) and ask you to type
+    # the right one's number. Typing "search wealth tax" throws away the
+    # automatic guess and re-ranks by whatever words you give it instead — an
+    # escape hatch for when none of the top 5 look right. Every confirmed
+    # answer is saved to eval_qa.json immediately, so closing the terminal
+    # partway through only costs the question you were on, not the ones
+    # already done.
+
+    remaining = [q["id"] for q in questions if q["type"] != "adversarial" and not q.get("ground_truth_chunk_id")]
+    print(f"Resolved {resolved_this_run} this run. {len(remaining)} still unresolved: {remaining or 'none'}.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -246,10 +404,14 @@ def main() -> int:
     retrieve_parser = subparsers.add_parser("retrieve", help="Phase 1: embed + retrieve all 18 questions.")
     retrieve_parser.add_argument("--token", required=True, help="A fresh Clerk session JWT.")
 
+    subparsers.add_parser("resolve-hints", help="Phase 0: confirm ground-truth chunks by hand.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
         return cmd_retrieve(args.token)
+    if args.command == "resolve-hints":
+        return cmd_resolve_hints()
 
     return 1  # pragma: no cover — argparse's `required=True` already rejects this
 
@@ -280,6 +442,16 @@ if __name__ == "__main__" and len(sys.argv) == 1:
     remaining = _seconds_remaining(fake_token)
     assert 95 < remaining <= 100, f"expected ~100s remaining, got {remaining:.1f}"
 
-    print("OK — cache/atomic-write/token-expiry logic checked without a network call.")
+    kws = _keywords("The Wufoo company is based in Tampa, Florida.")
+    assert "wufoo" in kws and "tampa" in kws, "significant words were not extracted"
+    assert "the" not in kws and "is" not in kws, "stopwords leaked through"
+
+    relevant = {"id": "a", "content": "Wufoo is a Tampa-based startup."}
+    unrelated = {"id": "b", "content": "Nothing relevant here."}
+    assert _score_chunk(relevant, kws) > _score_chunk(unrelated, kws), (
+        "keyword overlap did not rank the relevant chunk higher"
+    )
+
+    print("OK — cache/atomic-write/token-expiry/keyword-scoring logic checked without a network call.")
 elif __name__ == "__main__":
     raise SystemExit(main())
