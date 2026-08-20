@@ -57,6 +57,22 @@ GENERATIONS_PATH = CACHE_DIR / "generations.json"
 # what's left if retrieval contributed nothing — the whole point of this phase.
 CONDITIONS = ("rag", "no_rag")
 
+# Gemini's free tier caps at 15 requests/minute *per model* — real, hit in
+# practice on 2026-08-20 partway through a live run (36 Gemini calls in this
+# plan, one call every ~1s with no pacing). GPT-5.4-nano has no such cap here.
+# 65s, not the ~29s the error itself suggests: that number is how long was
+# left on the window at the *moment* of the error, not a fixed cooldown — a
+# minute plus margin is what actually guarantees a fresh window regardless of
+# when in it the failure landed.
+RATE_LIMIT_MARKERS = ("RateLimitError", "RESOURCE_EXHAUSTED", "429")
+RATE_LIMIT_BACKOFF_SECONDS = 65
+MAX_RATE_LIMIT_RETRIES = 3
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}"
+    return any(marker in text for marker in RATE_LIMIT_MARKERS)
+
 # `match_chunks` and `match_chunks_exact` both called at 10, once each, per
 # question. k=3/5 ablation views are just `[:3]`/`[:5]` slices of this same
 # list later — no extra Supabase round trips for them.
@@ -413,10 +429,22 @@ def cmd_generate() -> int:
     actual_cost = 0.0
     for question, model, condition in pending:
         key = f"{question['id']}:{model}:{condition}"
-        try:
-            result = _generate_one(question, model, condition, retrieval[question["id"]])
-        except Exception as exc:  # noqa: BLE001 — logged and skipped, not fatal
-            print(f"  {key}: FAILED ({type(exc).__name__}: {exc})")
+        result = None
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                result = _generate_one(question, model, condition, retrieval[question["id"]])
+                break
+            except Exception as exc:  # noqa: BLE001 — logged and skipped, not fatal
+                if _is_rate_limit_error(exc) and attempt < MAX_RATE_LIMIT_RETRIES:
+                    print(
+                        f"  {key}: rate-limited, waiting {RATE_LIMIT_BACKOFF_SECONDS}s "
+                        f"(retry {attempt + 1}/{MAX_RATE_LIMIT_RETRIES})..."
+                    )
+                    time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+                    continue
+                print(f"  {key}: FAILED ({type(exc).__name__}: {exc})")
+
+        if result is None:
             continue
         cache[key] = result
         _write_json_atomic(GENERATIONS_PATH, cache)
