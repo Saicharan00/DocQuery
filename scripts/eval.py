@@ -39,6 +39,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
 
+import litellm  # noqa: E402
 from jose import jwt  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
@@ -50,6 +51,11 @@ EVAL_QA_PATH = SCRIPT_DIR / "eval_qa.json"
 CACHE_DIR = SCRIPT_DIR / "eval_cache"
 RETRIEVAL_PATH = CACHE_DIR / "retrieval.json"
 CORPUS_PATH = CACHE_DIR / "corpus_chunks.json"
+GENERATIONS_PATH = CACHE_DIR / "generations.json"
+
+# rag/no_rag mirrors what a real answer sees at production's default k versus
+# what's left if retrieval contributed nothing — the whole point of this phase.
+CONDITIONS = ("rag", "no_rag")
 
 # `match_chunks` and `match_chunks_exact` both called at 10, once each, per
 # question. k=3/5 ablation views are just `[:3]`/`[:5]` slices of this same
@@ -190,6 +196,20 @@ def _fetch_corpus_chunks(supabase: Client) -> list[dict]:
     # onto every chunk that belongs to it.
 
 
+def _history_for(question: dict) -> list[dict] | None:
+    """The one-turn conversation history a multi-turn question builds on, in
+    the `{role, content}` shape both `rewrite_query` and `build_messages`
+    expect. `None` for every other question type.
+    """
+    if question["type"] != "multi-turn":
+        return None
+    turn = question["context_turn"]
+    return [
+        {"role": "user", "content": turn["question"]},
+        {"role": "assistant", "content": turn["answer"]},
+    ]
+
+
 def _retrieve_one(supabase: Client, question: dict) -> dict:
     """Run one question through embed + both retrieval functions + images.
 
@@ -197,15 +217,8 @@ def _retrieve_one(supabase: Client, question: dict) -> dict:
     embedding has to be of a standalone question, or "how does that compare"
     embeds to noise.
     """
-    if question["type"] == "multi-turn":
-        turn = question["context_turn"]
-        history = [
-            {"role": "user", "content": turn["question"]},
-            {"role": "assistant", "content": turn["answer"]},
-        ]
-        query_text = rag.rewrite_query(question["question"], history)
-    else:
-        query_text = question["question"]
+    history = _history_for(question)
+    query_text = rag.rewrite_query(question["question"], history) if history else question["question"]
 
     query_vector = rag.embed_query(query_text)
     hnsw10 = rag.retrieve(supabase, query_vector, k=MATCH_COUNT)
@@ -275,6 +288,162 @@ def cmd_retrieve(token: str) -> int:
         print(f"Still missing: {', '.join(missing)} — rerun with a fresh token to fill these in.")
 
     return 0
+
+
+def _messages_for(question: dict, condition: str, retrieval_entry: dict) -> tuple[list[dict], list[str]]:
+    """The exact messages `stream_answer` would receive for one question under
+    one condition, plus the chunk ids used (empty for `no_rag`).
+
+    `rag` always takes the top `RETRIEVE_K` of Phase 1's cached hnsw10 —
+    matching production's own default k, not the k=10 the retrieval cache
+    happens to hold. The original (unrewritten) question goes to the model,
+    with history to explain it — `rewrite_query`'s output is for the
+    *embedding* only and is never shown to an answering model, in eval or in
+    `/chat`.
+    """
+    history = _history_for(question)
+    if condition == "rag":
+        chunks = retrieval_entry["hnsw10"][: rag.RETRIEVE_K]
+        images = retrieval_entry["images"]
+    else:
+        chunks, images = [], {}
+
+    messages = rag.build_messages(question["question"], chunks, images, history)
+    return messages, [chunk["id"] for chunk in chunks]
+
+
+def _call_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    """Estimated USD cost of one call, or `None` if litellm has no pricing
+    entry for this model. Never fatal: a call still happened and is still
+    worth recording even if we can't price it.
+    """
+    try:
+        input_cost, output_cost = litellm.cost_per_token(
+            model=model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+        )
+        return input_cost + output_cost
+    except Exception:  # noqa: BLE001 — pricing is a nice-to-have, not a blocker
+        return None
+
+
+def _generate_one(question: dict, model: str, condition: str, retrieval_entry: dict) -> dict:
+    """One real call: build the prompt, stream the answer, time it, price it."""
+    messages, chunk_ids = _messages_for(question, condition, retrieval_entry)
+    input_tokens = litellm.token_counter(model=model, messages=messages)
+
+    started = time.monotonic()
+    first_token_at: float | None = None
+    parts: list[str] = []
+    for token in rag.stream_answer(model, messages):
+        if first_token_at is None:
+            first_token_at = time.monotonic()
+        parts.append(token)
+    finished = time.monotonic()
+
+    answer = "".join(parts)
+    output_tokens = litellm.token_counter(model=model, text=answer) if answer else 0
+
+    return {
+        "answer": answer,
+        "chunk_ids": chunk_ids,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost_usd": _call_cost(model, input_tokens, output_tokens),
+        "time_to_first_token": (first_token_at - started) if first_token_at else None,
+        "total_latency": finished - started,
+    }
+
+
+def cmd_generate() -> int:
+    """Phase 2a: every question answered by every model, with and without
+    retrieval. No Supabase calls at all — everything it needs is already on
+    disk from Phase 1, which is the entire reason this phase can take its
+    time instead of racing a dying token.
+    """
+    if not RETRIEVAL_PATH.exists():
+        print(f"{RETRIEVAL_PATH.name} not found. Run `retrieve` first.")
+        return 1
+
+    questions = json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))
+    retrieval = json.loads(RETRIEVAL_PATH.read_text(encoding="utf-8"))
+    cache: dict = json.loads(GENERATIONS_PATH.read_text(encoding="utf-8")) if GENERATIONS_PATH.exists() else {}
+
+    for model in rag.SUPPORTED_MODELS:
+        rag.api_key_for(model)  # fail fast on a missing key, before spending anything
+
+    plan = [
+        (question, model, condition)
+        for question in questions
+        for model in rag.SUPPORTED_MODELS
+        for condition in CONDITIONS
+    ]
+    pending = [
+        (q, model, condition)
+        for q, model, condition in plan
+        if f"{q['id']}:{model}:{condition}" not in cache
+    ]
+
+    if not pending:
+        print(f"All {len(plan)} calls already cached — nothing to do.")
+        return 0
+
+    estimated_cost = 0.0
+    unpriced = 0
+    for question, model, condition in pending:
+        messages, _ = _messages_for(question, condition, retrieval[question["id"]])
+        input_tokens = litellm.token_counter(model=model, messages=messages)
+        # Worst case, not typical: MAX_ANSWER_TOKENS as the assumed output
+        # length is the safe direction to be wrong in for a number whose whole
+        # job is to be checked before real money moves.
+        cost = _call_cost(model, input_tokens, rag.MAX_ANSWER_TOKENS)
+        if cost is None:
+            unpriced += 1
+        else:
+            estimated_cost += cost
+
+    print(f"{len(pending)} call(s) pending ({len(cache)}/{len(plan)} already cached).")
+    print(f"Estimated cost (worst case): ${estimated_cost:.2f}", end="")
+    print(f", plus {unpriced} call(s) litellm has no pricing for." if unpriced else ".")
+
+    if input('Type "yes" to spend real money and proceed, anything else to cancel: ').strip().lower() != "yes":
+        print("Cancelled — no calls made.")
+        return 0
+
+    started = time.monotonic()
+    actual_cost = 0.0
+    for question, model, condition in pending:
+        key = f"{question['id']}:{model}:{condition}"
+        try:
+            result = _generate_one(question, model, condition, retrieval[question["id"]])
+        except Exception as exc:  # noqa: BLE001 — logged and skipped, not fatal
+            print(f"  {key}: FAILED ({type(exc).__name__}: {exc})")
+            continue
+        cache[key] = result
+        _write_json_atomic(GENERATIONS_PATH, cache)
+        actual_cost += result["cost_usd"] or 0.0
+        print(f"  {key}: done (${result['cost_usd'] or 0:.4f}, {result['total_latency']:.1f}s)")
+
+    elapsed = time.monotonic() - started
+    missing = [
+        f"{q['id']}:{model}:{condition}"
+        for q, model, condition in plan
+        if f"{q['id']}:{model}:{condition}" not in cache
+    ]
+    print(f"\nDone in {elapsed:.0f}s. Spent ${actual_cost:.4f}. {len(plan) - len(missing)}/{len(plan)} cached.")
+    if missing:
+        print(f"Still missing: {', '.join(missing)} — rerun `generate` to retry just these.")
+
+    return 0
+
+    # In plain English, this command: first works out every (question, model,
+    # with/without-retrieval) combination there should be — 18 x 2 x 2 = 72 —
+    # and drops any that are already saved from a previous run. Then, before
+    # spending a cent, it adds up what the *worst case* would cost (assuming
+    # every answer runs to the maximum allowed length) and shows you that
+    # number, refusing to go further until you type "yes". Only after that
+    # does it actually call the models, one at a time, saving each answer to
+    # disk the moment it arrives — so if it's interrupted partway, rerunning
+    # only pays for and redoes the ones that didn't finish.
 
 
 def _keywords(text: str) -> set[str]:
@@ -406,12 +575,16 @@ def main() -> int:
 
     subparsers.add_parser("resolve-hints", help="Phase 0: confirm ground-truth chunks by hand.")
 
+    subparsers.add_parser("generate", help="Phase 2a: answer every question, every model, rag vs no-rag.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
         return cmd_retrieve(args.token)
     if args.command == "resolve-hints":
         return cmd_resolve_hints()
+    if args.command == "generate":
+        return cmd_generate()
 
     return 1  # pragma: no cover — argparse's `required=True` already rejects this
 
