@@ -1,0 +1,154 @@
+[
+  {
+    "id": "sf-01",
+    "type": "straightforward",
+    "source_doc": "alien.html",
+    "question": "What kinds of ideas does Graham suggest would probably be shared by intelligent beings anywhere in the universe?",
+    "ground_truth_answer": "Mathematical truths, physical truths (e.g. the mass of a carbon atom), the validity of controlled experiments for testing hypotheses, the idea that practice improves performance, and Occam's razor.",
+    "ground_truth_chunk_hint": "the paragraph listing candidate 'alien truths' shared by any intelligent species"
+  },
+  {
+    "id": "sf-02",
+    "type": "straightforward",
+    "source_doc": "alien.html",
+    "question": "What idea from mathematician Paul Erdős does Graham connect to the concept of alien truth?",
+    "ground_truth_answer": "Erdős's idea of 'God's book' — a book containing the most beautiful, exceptional proofs, which feel 'more discovered than invented.'",
+    "ground_truth_chunk_hint": "the paragraph mentioning Erdős and 'God's book'"
+  },
+  {
+    "id": "sf-03",
+    "type": "straightforward",
+    "source_doc": "do.html",
+    "question": "According to 'What to Do', what three things does Graham say we should do?",
+    "ground_truth_answer": "Help people, take care of the world, and make good new things.",
+    "ground_truth_chunk_hint": "the opening statement of the essay's three principles"
+  },
+  {
+    "id": "sf-04",
+    "type": "straightforward",
+    "source_doc": "do.html",
+    "question": "Why did Graham pick the phrase 'make good new things' instead of 'have good new ideas'?",
+    "ground_truth_answer": "Because it's broader — it covers physics, art, and music, not just ideas — and it forces actual creation rather than mere criticism or having ideas without acting on them.",
+    "ground_truth_chunk_hint": "the passage explaining the choice of wording between 'things' and 'ideas'"
+  },
+  {
+    "id": "sf-05",
+    "type": "straightforward",
+    "source_doc": "winc.html",
+    "question": "What conversion rate does Graham give between a wealth tax and an equivalent income tax, assuming a 5% return on capital?",
+    "ground_truth_answer": "Roughly 20 to 1 — a 1% wealth tax is equivalent to a 20% income tax.",
+    "ground_truth_chunk_hint": "the passage stating the wealth-tax-to-income-tax conversion formula"
+  },
+  {
+    "id": "sf-06",
+    "type": "straightforward",
+    "source_doc": "winc.html",
+    "question": "What combined marginal tax rate does Graham calculate for a median US state adding a 1% wealth tax, and how does it compare to Denmark's rate?",
+    "ground_truth_answer": "61.75% (37% federal + 4.75% average state + 20% wealth-tax equivalent), which exceeds Denmark's top rate of 60.5%.",
+    "ground_truth_chunk_hint": "the passage with the real-world combined-rate calculation and the Denmark comparison"
+  },
+  {
+    "id": "sf-07",
+    "type": "straightforward",
+    "source_doc": "hubs.html",
+    "question": "Who does Graham describe a college student meeting by chance after moving to Palo Alto, in the essay's Facebook-era example?",
+    "ground_truth_answer": "Sean Parker — the essay's example of a chance meeting (around the 2004 Facebook era) that connected a student with someone who understood the domain and had investor connections.",
+    "ground_truth_chunk_hint": "the passage describing the chance meeting with Sean Parker"
+  },
+  {
+    "id": "sf-08",
+    "type": "straightforward",
+    "source_doc": "hubs.html",
+    "question": "What Florida-based company does Graham cite as a startup that succeeded outside a major startup hub?",
+    "ground_truth_answer": "Wufoo, based in Tampa.",
+    "ground_truth_chunk_hint": "the passage naming Wufoo as the Tampa-based counterexample"
+  },
+  {
+    "id": "sf-09",
+    "type": "straightforward",
+    "source_doc": "attention_is_all_you_need.pdf",
+    "question": "What BLEU score did the Transformer get on the WMT 2014 English-to-German translation task, and by how much did it beat the previous best?",
+    "ground_truth_answer": "28.4 BLEU, improving over the existing best results (including ensembles) by more than 2 BLEU.",
+    "ground_truth_chunk_hint": "the abstract / results passage giving the English-German BLEU score"
+  },
+  {
+    "id": "sf-10",
+    "type": "straightforward",
+    "source_doc": "attention_is_all_you_need.pdf",
+    "question": "How long did it take to train the big Transformer model that hit a new state-of-the-art on English-to-French, and on what hardware?",
+    "ground_truth_answer": "3.5 days on eight GPUs, reaching a BLEU score of 41.8.",
+    "ground_truth_chunk_hint": "the results passage giving English-French BLEU and training time/hardware"
+  },
+  {
+    "id": "mh-01",
+    "type": "multi-hop",
+    "source_doc": "winc.html",
+    "question": "Using Graham's conversion rate, if you start with $100 earning 5% for a year, what do you end up with after tax under either a 20% income tax or an equivalent 1% wealth tax?",
+    "ground_truth_answer": "$104 either way. Under 20% income tax: you earn $5, pay $1 in tax, keep $104. Under a 1% wealth tax: you pay $1 on the $100 principal but keep the full $5 earned, also ending at $104.",
+    "ground_truth_chunk_hint": "needs BOTH the conversion-formula chunk and the separate worked $100 example chunk"
+  },
+  {
+    "id": "mh-02",
+    "type": "multi-hop",
+    "source_doc": "hubs.html",
+    "question": "What are the two components of Silicon Valley's 'antidote' to startup failure, and what single underlying factor does Graham say drives both of them?",
+    "ground_truth_answer": "(1) An environment/culture where starting a company feels normal rather than like unemployment, and (2) chance meetings with people who can help. Both depend on the population density of startup-minded people concentrated in one place.",
+    "ground_truth_chunk_hint": "needs BOTH the 'two components of the antidote' chunk and the separate 'underlying driver: density' chunk"
+  },
+  {
+    "id": "mh-03",
+    "type": "multi-hop",
+    "source_doc": "attention_is_all_you_need.pdf",
+    "question": "What does the paper claim about the Transformer's parallelizability and training cost compared to recurrent/convolutional models, and what specific training-time result backs that claim up?",
+    "ground_truth_answer": "The paper claims the Transformer is more parallelizable and needs significantly less time to train. That's backed up by the big model reaching a new state-of-the-art 41.8 BLEU on English-French after training only 3.5 days on 8 GPUs — 'a small fraction of the training costs of the best models from the literature.'",
+    "ground_truth_chunk_hint": "needs BOTH the abstract's parallelizability/cost claim and the results section's 3.5-day training figure"
+  },
+  {
+    "id": "adv-01",
+    "type": "adversarial",
+    "source_doc": "hubs.html",
+    "question": "What does Graham say in 'Why Startup Hubs Work' about the effect of remote work on where startups form?",
+    "ground_truth_answer": "Not addressed in the essay. Correct behavior: 'I don't see this in the provided documents.'",
+    "ground_truth_chunk_hint": "none — deliberately not in the corpus"
+  },
+  {
+    "id": "adv-02",
+    "type": "adversarial",
+    "source_doc": "attention_is_all_you_need.pdf",
+    "question": "According to 'Attention Is All You Need', what large unlabeled text corpus was the Transformer pre-trained on before being fine-tuned for translation?",
+    "ground_truth_answer": "Not in the paper. The original Transformer was trained directly and only on the WMT translation pairs — no separate unsupervised pretraining phase (that came later with BERT/GPT). Correct behavior: 'I don't see this in the provided documents.'",
+    "ground_truth_chunk_hint": "none — deliberately not in the corpus; a plausible-sounding trap for anyone assuming all transformers are pretrained"
+  },
+  {
+    "id": "mt-01",
+    "type": "multi-turn",
+    "source_doc": "do.html",
+    "context_turn": {
+      "question": "According to 'What to Do', what three things does Graham say we should do?",
+      "answer": "Help people, take care of the world, and make good new things."
+    },
+    "question": "Which of those does he say deserves the most emphasis, and why?",
+    "ground_truth_answer": "'Make good new things' — he argues it's the highest expression of human thinking and humanity's most impressive capability, and singles it out for more emphasis than the other two.",
+    "ground_truth_chunk_hint": "the passage arguing 'make good new things' deserves particular emphasis"
+  },
+  {
+    "id": "mt-02",
+    "type": "multi-turn",
+    "source_doc": "winc.html",
+    "context_turn": {
+      "question": "What combined marginal tax rate does Graham calculate for a median US state after adding a 1% wealth tax?",
+      "answer": "61.75%."
+    },
+    "question": "How does that compare to Denmark's rate?",
+    "ground_truth_answer": "It exceeds Denmark's rate, which Graham cites as the world's highest at 60.5%.",
+    "ground_truth_chunk_hint": "same passage as sf-06 — tests whether the rewrite step resolves 'that' back to the 61.75% figure"
+  },
+  {
+    "id": "fig-01",
+    "type": "figure-only",
+    "source_doc": "attention_is_all_you_need.pdf",
+    "question": "Looking at the architecture diagram (Figure 1), what two blocks are stacked at the very top of the decoder, right before the model outputs its probabilities?",
+    "ground_truth_answer": "A Linear layer followed by a Softmax layer, producing the 'Output Probabilities.'",
+    "ground_truth_chunk_hint": "the Figure 1 architecture diagram image (near the start of the paper) — confirm the actual page/chunk against your app's retrieved sources, page numbering depends on your upload"
+  }
+]
