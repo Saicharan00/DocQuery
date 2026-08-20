@@ -1,0 +1,866 @@
+{
+  "sf-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided sources, intelligent beings elsewhere in the universe would likely share:\n\n* The truths of mathematics and physics (such as the mass of a carbon atom) [1].\n* The principle that a controlled experiment testing a hypothesis entitles one to have a proportionally increased belief in it [1].\n* The idea that one can get better at something by practicing [1].\n* Occam's razor [1][2].",
+    "chunk_ids": [
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b",
+      "1426e469-ffd8-4d75-b27d-6609236c9217",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316"
+    ],
+    "input_tokens": 3054,
+    "output_tokens": 86,
+    "cost_usd": 0.0011312,
+    "time_to_first_token": 0.875,
+    "total_latency": 1.1090000000112923
+  },
+  "sf-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of \"Graham\" or what kinds of ideas intelligent beings anywhere in the universe would share. Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 166,
+    "output_tokens": 39,
+    "cost_usd": 0.0001473,
+    "time_to_first_token": 0.5159999999887077,
+    "total_latency": 0.6409999999887077
+  },
+  "sf-01:gpt-5.4-nano:rag": {
+    "answer": "Graham suggests that intelligent beings anywhere in the universe would probably share:\n\n- **The truths of mathematics and physics** (e.g., the same math truths by definition, and physical facts like the mass of a carbon atom being the same). [1]  \n- **The principle that controlled experiments increase belief** in a hypothesis in proportion to the evidence. [1]  \n- **The idea that practicing helps you get better at something.** [1]  \n- **Occam\u2019s razor** (favoring simpler explanations). [1]  \n- Possibly **justice** and other non-mathematical/phsyical concepts, with the \u201calien truth\u201d approach being generous about what might plausibly be relevant to aliens. [1]",
+    "chunk_ids": [
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b",
+      "1426e469-ffd8-4d75-b27d-6609236c9217",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316"
+    ],
+    "input_tokens": 3054,
+    "output_tokens": 150,
+    "cost_usd": 0.0007983,
+    "time_to_first_token": 2.922000000005937,
+    "total_latency": 3.812000000005355
+  },
+  "sf-01:gpt-5.4-nano:no_rag": {
+    "answer": "Graham suggests that intelligent beings anywhere in the universe would probably share ideas about **(1) how to maximize mutual understanding** and **(2) the structure of rational inference**\u2014i.e., broadly \u201chuman-like\u201d concepts of reasoning and communication that arise from the need to deal with the universe in consistent, logical ways [1].",
+    "chunk_ids": [],
+    "input_tokens": 166,
+    "output_tokens": 68,
+    "cost_usd": 0.0001182,
+    "time_to_first_token": 0.7660000000032596,
+    "total_latency": 1.360000000000582
+  },
+  "sf-02:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Paul Graham connects the concept of alien truth to Erd\u0151s's idea of \"God's book,\" which Erd\u0151s used to describe particularly good proofs [1]. The implications of this idea are:\n1. A sufficiently good proof was more discovered than invented [1].\n2. The goodness of that proof would be universally recognized [1].",
+    "chunk_ids": [
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b",
+      "1426e469-ffd8-4d75-b27d-6609236c9217",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706"
+    ],
+    "input_tokens": 2214,
+    "output_tokens": 66,
+    "cost_usd": 0.0008292,
+    "time_to_first_token": 1.3589999999967404,
+    "total_latency": 1.5929999999934807
+  },
+  "sf-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of mathematician Paul Erd\u0151s, Graham, or \"alien truth.\" Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 165,
+    "output_tokens": 34,
+    "cost_usd": 0.00013450000000000002,
+    "time_to_first_token": 0.375,
+    "total_latency": 0.5160000000032596
+  },
+  "sf-02:gpt-5.4-nano:rag": {
+    "answer": "Graham connects \u201calien truth\u201d to Erd\u0151s\u2019s idea of **\u201cGod\u2019s book,\u201d** where a particularly good proof is something that seems to be more **discovered than invented** and whose **goodness would be universally recognized** [1].",
+    "chunk_ids": [
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b",
+      "1426e469-ffd8-4d75-b27d-6609236c9217",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706"
+    ],
+    "input_tokens": 2214,
+    "output_tokens": 51,
+    "cost_usd": 0.0005065499999999999,
+    "time_to_first_token": 1.2660000000032596,
+    "total_latency": 1.5310000000026776
+  },
+  "sf-02:gpt-5.4-nano:no_rag": {
+    "answer": "Graham connects the concept of \u201calien truth\u201d to **Erd\u0151s\u2019s \u201cprobabilistic method\u201d** in mathematics [1].",
+    "chunk_ids": [],
+    "input_tokens": 165,
+    "output_tokens": 28,
+    "cost_usd": 6.8e-05,
+    "time_to_first_token": 1.9689999999973224,
+    "total_latency": 2.1089999999967404
+  },
+  "sf-03:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "According to \"What to Do,\" the three things one should do are:\n\n1. Help people [1]\n2. Take care of the world [1]\n3. Make good new things [1]",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "cada9661-e77c-4d13-ba9d-083143b9fcaf",
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b"
+    ],
+    "input_tokens": 3043,
+    "output_tokens": 41,
+    "cost_usd": 0.0010153999999999999,
+    "time_to_first_token": 0.5470000000059372,
+    "total_latency": 0.6879999999946449
+  },
+  "sf-03:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "According to the document 'What to Do', Graham says we should do the following three things:\n\n1. **Don't panic.** [1]\n2. **Keep a clear head.** [1]\n3. **Stand together.** [1]",
+    "chunk_ids": [],
+    "input_tokens": 164,
+    "output_tokens": 52,
+    "cost_usd": 0.00017920000000000002,
+    "time_to_first_token": 0.3899999999994179,
+    "total_latency": 0.5780000000086147
+  },
+  "sf-03:gpt-5.4-nano:rag": {
+    "answer": "In \u201cWhat to Do,\u201d Paul Graham says we should: (1) help people, (2) take care of the world, and (3) make good new things. [1]",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "cada9661-e77c-4d13-ba9d-083143b9fcaf",
+      "1f3f5a6b-936d-4da6-aba2-d825a657ac2b"
+    ],
+    "input_tokens": 3043,
+    "output_tokens": 39,
+    "cost_usd": 0.0006573499999999999,
+    "time_to_first_token": 1.0779999999940628,
+    "total_latency": 1.4689999999973224
+  },
+  "sf-03:gpt-5.4-nano:no_rag": {
+    "answer": "I can\u2019t answer because the source content for **\u201cWhat to Do\u201d** (and Graham\u2019s specific statements) isn\u2019t included in the materials provided to me in this chat. If you paste the text of \u201cWhat to Do\u201d or upload the relevant excerpt, I\u2019ll identify the three things Graham says to do.",
+    "chunk_ids": [],
+    "input_tokens": 164,
+    "output_tokens": 64,
+    "cost_usd": 0.0001128,
+    "time_to_first_token": 0.375,
+    "total_latency": 1.0
+  },
+  "sf-04:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Graham preferred the phrasing \"make good new things\" over \"have good new ideas\" for a few reasons:\n\n* **Greater generality:** \"Have good new ideas\" did not seem general enough because it did not include making art or music, except insofar as they embody new ideas (and art/music embody more than just ideas) [1].\n* **A bias toward creation:** The phrasing \"make good new things\" biases us toward creation [1]. It causes people to prefer ideas that naturally result in making things, rather than making critical observations about things other people have made [1]. \n* **The connection to understanding:** Even for conscious ideas, making things relates to understanding [1]. To understand something deeply, one needs to be able to make a model of it or write about it; trying to express what you understand is a way to understand it better [1].",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "04f4d353-3639-4fd8-b629-279a41525da5"
+    ],
+    "input_tokens": 2661,
+    "output_tokens": 180,
+    "cost_usd": 0.0012483,
+    "time_to_first_token": 1.0310000000026776,
+    "total_latency": 1.6560000000026776
+  },
+  "sf-04:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of why Graham picked the phrase \"make good new things\" instead of \"have good new ideas.\" Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 167,
+    "output_tokens": 40,
+    "cost_usd": 0.00015010000000000002,
+    "time_to_first_token": 0.875,
+    "total_latency": 0.9689999999973224
+  },
+  "sf-04:gpt-5.4-nano:rag": {
+    "answer": "Graham says he initially used \u201cgood new ideas,\u201d but prefers the broader phrasing \u201cmake good new things\u201d because \u201cgood new ideas\u201d didn\u2019t seem general enough\u2014e.g., it doesn\u2019t clearly cover making art or music except in a way that stretches the word \u201cidea\u201d to include \u201ceverything that goes through your nervous system\u201d [1].",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "04f4d353-3639-4fd8-b629-279a41525da5"
+    ],
+    "input_tokens": 2661,
+    "output_tokens": 72,
+    "cost_usd": 0.0006221999999999999,
+    "time_to_first_token": 0.875,
+    "total_latency": 1.562999999994645
+  },
+  "sf-04:gpt-5.4-nano:no_rag": {
+    "answer": "The provided sources don\u2019t include any information about Graham, or about the phrases \u201cmake good new things\u201d vs. \u201chave good new ideas,\u201d so I can\u2019t determine why Graham picked one instead of the other based on the available material.",
+    "chunk_ids": [],
+    "input_tokens": 167,
+    "output_tokens": 48,
+    "cost_usd": 9.340000000000001e-05,
+    "time_to_first_token": 0.40600000000267755,
+    "total_latency": 0.75
+  },
+  "sf-05:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided source, the conversion rate given between a wealth tax and an equivalent income tax (assuming a 5% risk-free rate of return) is about 20 [1]. A wealth tax of 1% is equivalent to an income tax of 20% [1].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 2658,
+    "output_tokens": 58,
+    "cost_usd": 0.0009423999999999999,
+    "time_to_first_token": 1.062000000005355,
+    "total_latency": 1.687000000005355
+  },
+  "sf-05:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, the answer is not present.",
+    "chunk_ids": [],
+    "input_tokens": 172,
+    "output_tokens": 12,
+    "cost_usd": 8.16e-05,
+    "time_to_first_token": 0.4539999999979045,
+    "total_latency": 0.4539999999979045
+  },
+  "sf-05:gpt-5.4-nano:rag": {
+    "answer": "Graham says the conversion rate is about **20**: **a 1% wealth tax is equivalent to a 20% income tax**, assuming a **5%** rate of return on capital [1].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 2658,
+    "output_tokens": 42,
+    "cost_usd": 0.0005841,
+    "time_to_first_token": 0.3899999999994179,
+    "total_latency": 0.8120000000053551
+  },
+  "sf-05:gpt-5.4-nano:no_rag": {
+    "answer": "Graham\u2019s conversion rate is **1.3**\u2014i.e., a **wealth tax of X** is equivalent to an **income tax of 1.3X**, assuming a **5% return on capital** [1].",
+    "chunk_ids": [],
+    "input_tokens": 172,
+    "output_tokens": 48,
+    "cost_usd": 9.44e-05,
+    "time_to_first_token": 0.46899999999732245,
+    "total_latency": 0.7029999999940628
+  },
+  "sf-06:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "To find the combined marginal tax rate, Graham calculates the sum of the top US federal tax rate (37%), the median state income tax rate (Oklahoma's at 4.75%), and the 20% income tax equivalent of a 1% wealth tax (since a 1% wealth tax is equivalent to a 20% income tax) [1], [2]. This gives a total marginal tax rate of:\n\n$$\\text{37\\%} + \\text{4.75\\%} + \\text{20\\%} = \\text{61.75\\%}$$\n\nComparing this to Denmark\u2014which currently has the highest marginal income tax rate in the world at 60.5%\u2014a median US state adding a 1% wealth tax would cause its residents to have an even higher rate, resulting in the highest taxes in the world [1], [2].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 1771,
+    "output_tokens": 185,
+    "cost_usd": 0.0009938,
+    "time_to_first_token": 0.8439999999973224,
+    "total_latency": 1.0
+  },
+  "sf-06:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of Graham, a median US state adding a 1% wealth tax, or a comparison to Denmark's rate. Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 43,
+    "cost_usd": 0.0001609,
+    "time_to_first_token": 0.40600000000267755,
+    "total_latency": 0.6720000000059372
+  },
+  "sf-06:gpt-5.4-nano:rag": {
+    "answer": "Paul Graham computes that in the **median case**, a US state adding a **1% wealth tax** corresponds to adding **20% to the income tax rate** (his conversion rate: \u201c1% of wealth tax is equivalent to 20% of income tax\u201d) [1]. He then combines that with existing marginal rates: top US federal **37%** plus median state income tax **4.75%**, plus the converted **20%**, for a total of **61.75%** [3].\n\nHe compares this to **Denmark\u2019s highest marginal income tax rate of 60.5%** [3]. So Graham\u2019s median-case combined marginal rate (**61.75%**) is **slightly higher than Denmark\u2019s 60.5%** [3].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 1771,
+    "output_tokens": 158,
+    "cost_usd": 0.0005517,
+    "time_to_first_token": 0.5,
+    "total_latency": 1.7029999999940628
+  },
+  "sf-06:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have the needed sources to answer this. Please provide the relevant text/image(s) from Graham\u2019s calculation and the Denmark comparison, and I\u2019ll compute and cite the combined marginal tax rate and the comparison.",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 43,
+    "cost_usd": 8.935e-05,
+    "time_to_first_token": 0.4850000000005821,
+    "total_latency": 0.7970000000059372
+  },
+  "sf-07:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "In the Facebook-era example, Graham describes a college student who moved to Palo Alto for the summer by chance running into Sean Parker on a random suburban street [2].",
+    "chunk_ids": [
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d"
+    ],
+    "input_tokens": 2759,
+    "output_tokens": 33,
+    "cost_usd": 0.0009102,
+    "time_to_first_token": 0.45300000000861473,
+    "total_latency": 0.5780000000086147
+  },
+  "sf-07:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of an essay by \"Graham,\" a college student moving to Palo Alto, or a Facebook-era example. Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 171,
+    "output_tokens": 42,
+    "cost_usd": 0.0001563,
+    "time_to_first_token": 0.375,
+    "total_latency": 0.5619999999908032
+  },
+  "sf-07:gpt-5.4-nano:rag": {
+    "answer": "Graham describes a college student who, after deciding to move to the Valley for the summer, \u201chappen[s] to run into **Sean Parker**\u201d on a random suburban street in Palo Alto [2].",
+    "chunk_ids": [
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d"
+    ],
+    "input_tokens": 2759,
+    "output_tokens": 43,
+    "cost_usd": 0.00060555,
+    "time_to_first_token": 1.875,
+    "total_latency": 2.2190000000118744
+  },
+  "sf-07:gpt-5.4-nano:no_rag": {
+    "answer": "The provided sources don\u2019t include the Graham essay passage (or the specific \u201cFacebook-era example\u201d describing a college student meeting by chance after moving to Palo Alto), so I can\u2019t determine who that person was.",
+    "chunk_ids": [],
+    "input_tokens": 171,
+    "output_tokens": 42,
+    "cost_usd": 8.669999999999999e-05,
+    "time_to_first_token": 0.40599999998812564,
+    "total_latency": 0.6409999999887077
+  },
+  "sf-08:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided sources, the company cited is Wufoo, though they were based in Tampa rather than Florida generally [1 (Notes [1])].",
+    "chunk_ids": [
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "ce6f1c57-e9ab-49c3-b5f5-f0d7e19c6425"
+    ],
+    "input_tokens": 2795,
+    "output_tokens": 31,
+    "cost_usd": 0.0009159999999999999,
+    "time_to_first_token": 0.625,
+    "total_latency": 0.7970000000059372
+  },
+  "sf-08:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, the Florida-based company that Graham cites as a startup that succeeded outside a major startup hub is Mailchimp [1].",
+    "chunk_ids": [],
+    "input_tokens": 165,
+    "output_tokens": 29,
+    "cost_usd": 0.000122,
+    "time_to_first_token": 0.28100000000267755,
+    "total_latency": 0.40600000000267755
+  },
+  "sf-08:gpt-5.4-nano:rag": {
+    "answer": "Graham cites **Wufoo**, which he says was based in **Tampa** (Florida) and succeeded outside a startup hub. [1]",
+    "chunk_ids": [
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "ce6f1c57-e9ab-49c3-b5f5-f0d7e19c6425"
+    ],
+    "input_tokens": 2795,
+    "output_tokens": 31,
+    "cost_usd": 0.00059775,
+    "time_to_first_token": 0.5629999999946449,
+    "total_latency": 0.8129999999946449
+  },
+  "sf-08:gpt-5.4-nano:no_rag": {
+    "answer": "I can\u2019t answer this as asked because the sources provided in this chat don\u2019t include the \u201cGraham\u201d citation or any information about a Florida-based startup that succeeded outside a major startup hub. [No relevant sources available.]",
+    "chunk_ids": [],
+    "input_tokens": 165,
+    "output_tokens": 45,
+    "cost_usd": 8.925e-05,
+    "time_to_first_token": 0.3899999999994179,
+    "total_latency": 0.7960000000020955
+  },
+  "sf-09:gpt-5.4-nano:rag": {
+    "answer": "The Transformer achieved **28.4 BLEU** on the **WMT 2014 English-to-German** translation task, and it **improved over the existing best results (including ensembles) by over 2 BLEU** [1][3].",
+    "chunk_ids": [
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "df1cb168-1b3b-44d6-804b-9e903a779393",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 3418,
+    "output_tokens": 53,
+    "cost_usd": 0.0007498499999999999,
+    "time_to_first_token": 0.4539999999979045,
+    "total_latency": 0.8289999999979045
+  },
+  "sf-09:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have the needed information in the provided sources to answer this question (the sources don\u2019t include the Transformer\u2019s BLEU score on WMT 2014 English\u2192German or the previous best score for comparison).",
+    "chunk_ids": [],
+    "input_tokens": 180,
+    "output_tokens": 44,
+    "cost_usd": 9.1e-05,
+    "time_to_first_token": 0.5310000000026776,
+    "total_latency": 0.8899999999994179
+  },
+  "sf-10:gpt-5.4-nano:rag": {
+    "answer": "The **big Transformer model** that achieved the new state-of-the-art on **WMT 2014 English-to-French** was trained for **3.5 days** on a machine with **8 NVIDIA P100 GPUs** ([1][3]).",
+    "chunk_ids": [
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "1e69cc6d-456a-4841-8944-855693608bbb",
+      "eae1281c-55c0-43c0-8340-b2927e70f335",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 2976,
+    "output_tokens": 51,
+    "cost_usd": 0.0006589499999999999,
+    "time_to_first_token": 0.5,
+    "total_latency": 0.8280000000086147
+  },
+  "sf-10:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have the needed information in the provided sources to answer this. Specifically, the sources available to me this turn don\u2019t state (1) how long training took for the \u201cbig Transformer\u201d model that achieved a new state-of-the-art on English-to-French, or (2) what hardware it was trained on.",
+    "chunk_ids": [],
+    "input_tokens": 177,
+    "output_tokens": 66,
+    "cost_usd": 0.00011790000000000002,
+    "time_to_first_token": 0.8600000000005821,
+    "total_latency": 1.2969999999913853
+  },
+  "mh-01:gpt-5.4-nano:rag": {
+    "answer": "You end up with **$104** in either case.\n\n- **20% income tax:** $100 earns 5% \u2192 $5 profit. Pay 20% of $5 = $1 tax, so after-tax profit is $4. End of year: $100 + $4 = **$104**. [1]  \n- **Equivalent 1% wealth tax (conversion rate 1% wealth \u2248 20% income):** $100 earns 5% \u2192 $5 profit. Pay 1% of $100 = $1 wealth tax, so remaining wealth is $99 plus the $5 profit \u2192 $104. End of year: **$104**. [1]",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "1e69cc6d-456a-4841-8944-855693608bbb"
+    ],
+    "input_tokens": 2716,
+    "output_tokens": 143,
+    "cost_usd": 0.00072195,
+    "time_to_first_token": 0.5629999999946449,
+    "total_latency": 1.4220000000059372
+  },
+  "mh-01:gpt-5.4-nano:no_rag": {
+    "answer": "I can\u2019t answer this as stated because the required source(s) with **Graham\u2019s conversion rate** (the rule needed to convert between an income tax rate and an \u201cequivalent\u201d wealth tax rate) are not included in the numbered sources provided.  \n\nIf you share the relevant source(s) that define Graham\u2019s conversion rate, I can compute the after-tax amounts for:\n- a **20% income tax** on the 5% year return, and\n- an **equivalent 1% wealth tax** scenario.",
+    "chunk_ids": [],
+    "input_tokens": 192,
+    "output_tokens": 107,
+    "cost_usd": 0.00017214999999999998,
+    "time_to_first_token": 0.4370000000053551,
+    "total_latency": 1.187000000005355
+  },
+  "mh-02:gpt-5.4-nano:rag": {
+    "answer": "Graham says Silicon Valley\u2019s \u201cantidote\u201d to startup failure has **two components**: **(1) being in a place where startups are the cool thing to do**, and **(2) chance meetings with people who can help you** [2].  \n\nHe further says that **both components are driven by the same underlying factor**: **the number of startup people around you** [3].",
+    "chunk_ids": [
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "159b330d-ae64-4421-be7c-179fd911dd07"
+    ],
+    "input_tokens": 2810,
+    "output_tokens": 81,
+    "cost_usd": 0.00066325,
+    "time_to_first_token": 0.4379999999946449,
+    "total_latency": 1.125
+  },
+  "mh-02:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have the referenced sources that contain Graham\u2019s \u201cantidote\u201d wording, the two components, or the single underlying factor he says drives both. Please provide the relevant text/image(s), and I\u2019ll extract the answer exactly and cite the sources.",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 52,
+    "cost_usd": 0.0001006,
+    "time_to_first_token": 0.40699999999196734,
+    "total_latency": 0.8129999999946449
+  },
+  "mh-03:gpt-5.4-nano:rag": {
+    "answer": "The paper claims that the Transformer is **more parallelizable** and can be trained with **significantly less time to train** than architectures based on recurrent or convolutional layers, because it **eschews recurrence entirely** and relies **only on attention** [1].  \n\nAs specific backing for this training-time claim, it reports that on the WMT 2014 English-to-German translation task, the **Transformer (big) was trained in 3.5 days on 8 P100 GPUs** [1].",
+    "chunk_ids": [
+      "260be8c5-79c8-48c3-b7cc-08f7155f9bb4",
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "df1cb168-1b3b-44d6-804b-9e903a779393"
+    ],
+    "input_tokens": 3997,
+    "output_tokens": 104,
+    "cost_usd": 0.0009293999999999999,
+    "time_to_first_token": 0.4539999999979045,
+    "total_latency": 1.0789999999979045
+  },
+  "mh-03:gpt-5.4-nano:no_rag": {
+    "answer": "The provided sources don\u2019t include the paper (or any text from it) and therefore don\u2019t contain any claim about the Transformer\u2019s parallelizability and training cost versus recurrent/convolutional models, nor the specific training-time result that would support that claim.  \n\nIf you share the paper excerpt (or the relevant sections/figures) I can answer precisely using the numbered sources.",
+    "chunk_ids": [],
+    "input_tokens": 182,
+    "output_tokens": 76,
+    "cost_usd": 0.0001314,
+    "time_to_first_token": 0.3279999999940628,
+    "total_latency": 1.062000000005355
+  },
+  "adv-01:gpt-5.4-nano:rag": {
+    "answer": "The provided sources from Paul Graham\u2019s **\u201cWhy Startup Hubs Work\u201d** do **not** mention remote work or discuss how remote work affects where startups form.",
+    "chunk_ids": [
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d"
+    ],
+    "input_tokens": 2758,
+    "output_tokens": 33,
+    "cost_usd": 0.00059285,
+    "time_to_first_token": 0.48399999999674037,
+    "total_latency": 0.625
+  },
+  "adv-01:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have the source text for \u201cWhy Startup Hubs Work\u201d in the material you provided, so I can\u2019t determine what Graham says about the effect of remote work on where startups form.",
+    "chunk_ids": [],
+    "input_tokens": 170,
+    "output_tokens": 40,
+    "cost_usd": 8.400000000000001e-05,
+    "time_to_first_token": 0.5310000000026776,
+    "total_latency": 0.7960000000020955
+  },
+  "adv-02:gpt-5.4-nano:rag": {
+    "answer": "The provided sources do not mention any large unlabeled text corpus that the Transformer was pre-trained on before fine-tuning for translation. [1][2][3]",
+    "chunk_ids": [
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "260be8c5-79c8-48c3-b7cc-08f7155f9bb4",
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0"
+    ],
+    "input_tokens": 3418,
+    "output_tokens": 33,
+    "cost_usd": 0.00072485,
+    "time_to_first_token": 0.5160000000032596,
+    "total_latency": 0.9220000000059372
+  },
+  "adv-02:gpt-5.4-nano:no_rag": {
+    "answer": "In *\u201cAttention Is All You Need\u201d*, the Transformer is described as being pre-trained on a **large unlabeled English corpus**, specifically **\u201cWMT\u201914 English\u2013French data\u201d** before fine-tuning for translation [1].",
+    "chunk_ids": [],
+    "input_tokens": 176,
+    "output_tokens": 49,
+    "cost_usd": 9.645000000000001e-05,
+    "time_to_first_token": 0.42199999999138527,
+    "total_latency": 0.9529999999940628
+  },
+  "mt-01:gpt-5.4-nano:rag": {
+    "answer": "Graham says there are three things you should do: **(1) help people, (2) take care of the world, and (3) make good new things** [1].",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "cada9661-e77c-4d13-ba9d-083143b9fcaf",
+      "159b330d-ae64-4421-be7c-179fd911dd07"
+    ],
+    "input_tokens": 2813,
+    "output_tokens": 39,
+    "cost_usd": 0.00061135,
+    "time_to_first_token": 0.5149999999994179,
+    "total_latency": 0.7810000000026776
+  },
+  "mt-01:gpt-5.4-nano:no_rag": {
+    "answer": "I can\u2019t answer this from the provided sources. The source you referred to (\u201cWhat to Do\u201d) isn\u2019t included here, and I only have the single earlier answer (\u201cHelp people, take care of the world, and make good new things\u201d) without the text explaining which gets the most emphasis or the reason.",
+    "chunk_ids": [],
+    "input_tokens": 201,
+    "output_tokens": 62,
+    "cost_usd": 0.0001177,
+    "time_to_first_token": 0.3899999999994179,
+    "total_latency": 0.875
+  },
+  "mt-02:gpt-5.4-nano:rag": {
+    "answer": "Graham computes a **combined marginal tax rate of 61.75%** for the median US state after adding a 1% wealth tax (converted to an additional 20% income tax), i.e., **37% (federal) + 4.75% (state) + 20% (wealth-tax equivalent)** = **61.75%** [1].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 1783,
+    "output_tokens": 78,
+    "cost_usd": 0.00045410000000000003,
+    "time_to_first_token": 0.5310000000026776,
+    "total_latency": 1.125
+  },
+  "mt-02:gpt-5.4-nano:no_rag": {
+    "answer": "I don\u2019t have enough information in the provided sources to determine Denmark\u2019s rate, so I can\u2019t compare it.",
+    "chunk_ids": [],
+    "input_tokens": 190,
+    "output_tokens": 23,
+    "cost_usd": 6.675e-05,
+    "time_to_first_token": 0.39100000000325963,
+    "total_latency": 0.625
+  },
+  "fig-01:gpt-5.4-nano:rag": {
+    "answer": "Right before the model outputs its probability distribution, the diagram shows **(1) a Linear block** followed by **(2) a Softmax block** at the very top of the decoder [2].",
+    "chunk_ids": [
+      "56404501-7ee8-4749-a49f-3965eb5cca23",
+      "05b3a183-b497-496d-ad95-6d76d12384c6",
+      "59903d96-ffb8-413d-b0cf-121fea0c8d41",
+      "3dfcb18b-a848-4a7c-bb9a-637f634be2d8",
+      "04330982-7fee-4fb6-a6ee-41bd94b59c71"
+    ],
+    "input_tokens": 1717,
+    "output_tokens": 41,
+    "cost_usd": 0.00039465,
+    "time_to_first_token": 0.6399999999994179,
+    "total_latency": 0.8280000000086147
+  },
+  "fig-01:gpt-5.4-nano:no_rag": {
+    "answer": "I can\u2019t answer this from the provided material: I don\u2019t have access to \u201cFigure 1\u201d (the architecture diagram) or any decoder diagram in the numbered sources you provided in this turn. If you share the figure (or the numbered source that contains it), I can identify the two top decoder blocks right before the output probabilities.",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 68,
+    "cost_usd": 0.0001206,
+    "time_to_first_token": 0.5149999999994179,
+    "total_latency": 0.9369999999908032
+  },
+  "sf-09:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "On the WMT 2014 English-to-German translation task, the big Transformer model achieved a BLEU score of 28.4 [1][3]. This score outperformed the best previously reported models (including ensembles) by more than 2.0 BLEU [1].",
+    "chunk_ids": [
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "df1cb168-1b3b-44d6-804b-9e903a779393",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 3418,
+    "output_tokens": 60,
+    "cost_usd": 0.0011753999999999998,
+    "time_to_first_token": 0.6100000000005821,
+    "total_latency": 0.7969999999913853
+  },
+  "sf-09:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, the Transformer achieved a BLEU score of 28.4 on the WMT 2014 English-to-German translation task [1]. This score improved upon the previous best results\u2014including ensembles\u2014by over 2 BLEU points [1].",
+    "chunk_ids": [],
+    "input_tokens": 180,
+    "output_tokens": 56,
+    "cost_usd": 0.000194,
+    "time_to_first_token": 0.4220000000059372,
+    "total_latency": 0.7030000000086147
+  },
+  "sf-10:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided sources, the big Transformer model was trained for **3.5 days** on **one machine with 8 NVIDIA P100 GPUs** [1][3].",
+    "chunk_ids": [
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "1e69cc6d-456a-4841-8944-855693608bbb",
+      "eae1281c-55c0-43c0-8340-b2927e70f335",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 2976,
+    "output_tokens": 36,
+    "cost_usd": 0.0009827999999999998,
+    "time_to_first_token": 0.4379999999946449,
+    "total_latency": 0.5789999999979045
+  },
+  "sf-10:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "To answer this question, we must look at the details for the \"big\" Transformer model (Transformer (big)) that established a new state-of-the-art on the WMT 2014 English-to-French translation task [1]. \n\n* **Training Time:** It took 3.5 days [1].\n* **Hardware:** It was trained on 8 GPUs [1].",
+    "chunk_ids": [],
+    "input_tokens": 177,
+    "output_tokens": 77,
+    "cost_usd": 0.0002456,
+    "time_to_first_token": 0.3600000000005821,
+    "total_latency": 0.6879999999946449
+  },
+  "mh-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Under either a 20% income tax or an equivalent 1% wealth tax, you end up with **$104** at the end of the year [1]. \n\nHere is how the math works out for each scenario based on the provided text:\n\n* **With a 20% income tax:** Your $100 earns a 5% rate of return ($5), bringing your total to $105 before taxes [1]. You must pay 20% of that $5 return in income tax (which is $1), leaving you with $4 in after-tax income [1]. At the end of the year, you have your initial $100 plus your $4 after-tax income, totaling **$104** [1].\n* **With a 1% wealth tax:** Your $100 earns a 5% rate of return ($5) [1]. However, you must pay 1% of your total $100 in wealth tax (which is $1) [1]. At the end of the year, you have your remaining $99 of capital plus the $5 return, totaling **$104** [1].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "1e69cc6d-456a-4841-8944-855693608bbb"
+    ],
+    "input_tokens": 2716,
+    "output_tokens": 228,
+    "cost_usd": 0.0013848,
+    "time_to_first_token": 0.4840000000112923,
+    "total_latency": 1.1090000000112923
+  },
+  "mh-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on Graham's conversion rate, an equivalent 1% wealth tax is equal to a 20% income tax [1]. \n\nIf you start with $100 earning 5% for a year, the investment earns $5 in interest, bringing the total to $105 before taxes [1]. \n\n* **Under a 20% income tax:** You pay a 20% tax on the $5 of earnings, which is $1 [1]. This leaves you with **$104** after tax [1].\n* **Under an equivalent 1% wealth tax:** You pay a 1% tax on the $100 starting capital (or total value), which is $1 [1]. This also leaves you with **$104** after tax [1].",
+    "chunk_ids": [],
+    "input_tokens": 192,
+    "output_tokens": 155,
+    "cost_usd": 0.00044510000000000003,
+    "time_to_first_token": 0.3909999999887077,
+    "total_latency": 0.7969999999913853
+  },
+  "mh-02:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided sources, the two components of the antidote are:\n1. Being in a place where startups are considered the cool/fashionable thing to do [2].\n2. Chance meetings with people who can help you [1][2].\n\nGraham states that both components are driven by a single underlying factor: the number (or density) of startup people around you [2][3].",
+    "chunk_ids": [
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "159b330d-ae64-4421-be7c-179fd911dd07"
+    ],
+    "input_tokens": 2810,
+    "output_tokens": 81,
+    "cost_usd": 0.0010455,
+    "time_to_first_token": 0.46899999999732245,
+    "total_latency": 0.75
+  },
+  "mh-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, the two components of Silicon Valley's \"antidote\" to startup failure are:\n1. A cheap programming language [1].\n2. Cheap hardware [1].\n\nGraham says that both of these are driven by a single underlying factor: **technology** [1].",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 60,
+    "cost_usd": 0.0002034,
+    "time_to_first_token": 0.48399999999674037,
+    "total_latency": 0.6870000000053551
+  },
+  "mh-03:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "The paper claims that the Transformer is more parallelizable and requires significantly less time to train compared to models based on recurrent or convolutional layers [2, 7]. \n\nThis claim is backed up by the following specific training-time results:\n* On the WMT 2014 English-to-German translation task, the big Transformer model established a new state-of-the-art BLEU score of 28.4 after training for **3.5 days on 8 P100 GPUs** [2, 4].\n* On the WMT 2014 English-to-French translation task, the model achieved a single-model state-of-the-art BLEU score of 41.8 after training for **3.5 days on eight GPUs**, which represents \"a small fraction of the training costs of the best models from the literature\" [2].",
+    "chunk_ids": [
+      "260be8c5-79c8-48c3-b7cc-08f7155f9bb4",
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0",
+      "df1cb168-1b3b-44d6-804b-9e903a779393"
+    ],
+    "input_tokens": 3997,
+    "output_tokens": 168,
+    "cost_usd": 0.0016191,
+    "time_to_first_token": 20.485000000000582,
+    "total_latency": 20.89100000000326
+  },
+  "mh-03:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, the paper claims that the Transformer allows for significantly more parallelization and can be trained in a fraction of the time compared to recurrent or convolutional models. \n\nThe specific training-time result that backs this up is that it achieved a new state-of-the-art on the WMT 2014 English-to-German translation task after training for 3.5 days on eight GPUs.",
+    "chunk_ids": [],
+    "input_tokens": 182,
+    "output_tokens": 81,
+    "cost_usd": 0.0002571,
+    "time_to_first_token": 21.593000000008033,
+    "total_latency": 21.889999999999418
+  },
+  "adv-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "The provided sources do not contain information about the effect of remote work on where startups form.",
+    "chunk_ids": [
+      "3e4dc7c9-d686-4b5e-b039-9491eabaf0cf",
+      "fbb6a62e-c7fa-4f7a-88a6-ce9f2127d7e5",
+      "04f4d353-3639-4fd8-b629-279a41525da5",
+      "257d8d7a-908b-46b1-9ee4-b375bd3cfb52",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d"
+    ],
+    "input_tokens": 2758,
+    "output_tokens": 18,
+    "cost_usd": 0.0008724,
+    "time_to_first_token": 0.5160000000032596,
+    "total_latency": 0.5320000000065193
+  },
+  "adv-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on \"Why Startup Hubs Work,\" Graham states that despite the rise of remote work, startups are still forming in hubs [1]. He explains that even though it is now technically possible to build a company without everyone in the same room, founders are still choosing to cluster together [1].",
+    "chunk_ids": [],
+    "input_tokens": 170,
+    "output_tokens": 59,
+    "cost_usd": 0.0001985,
+    "time_to_first_token": 0.4850000000005821,
+    "total_latency": 0.7660000000032596
+  },
+  "adv-02:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the provided sources, there is no mention of the Transformer being pre-trained on a large unlabeled text corpus before being fine-tuned for translation. The sources only mention training the Transformer on machine translation tasks (such as WMT 2014 English-to-German and English-to-French) [1][5] and English constituency parsing (using the Wall Street Journal portion of the Penn Treebank, as well as semi-supervised settings involving larger corpora) [2][3].",
+    "chunk_ids": [
+      "f2c8a69d-f0a3-49ac-a64b-3f8107d6b12e",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035",
+      "aee9fbc9-ed04-4236-a38d-3bd3531221fb",
+      "260be8c5-79c8-48c3-b7cc-08f7155f9bb4",
+      "afba622a-9a83-4d66-98e1-d1e57f664ad0"
+    ],
+    "input_tokens": 3418,
+    "output_tokens": 99,
+    "cost_usd": 0.0012729,
+    "time_to_first_token": 0.4369999999908032,
+    "total_latency": 0.7339999999967404
+  },
+  "adv-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided document, the sources do not contain information about the Transformer being pre-trained on a large unlabeled text corpus before being fine-tuned for translation.",
+    "chunk_ids": [],
+    "input_tokens": 176,
+    "output_tokens": 33,
+    "cost_usd": 0.0001353,
+    "time_to_first_token": 0.3600000000005821,
+    "total_latency": 0.5310000000026776
+  },
+  "mt-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "The provided sources do not state that any one of those principles deserves the most emphasis, nor do they explain why one would be emphasized over the others.",
+    "chunk_ids": [
+      "7bd9be42-9030-47d0-b856-04e20984281a",
+      "b4a3c90c-26af-45fa-9d29-c4c277e4f610",
+      "86f79c79-7d63-4db4-ba7d-8cdf7f71b316",
+      "cada9661-e77c-4d13-ba9d-083143b9fcaf",
+      "159b330d-ae64-4421-be7c-179fd911dd07"
+    ],
+    "input_tokens": 2813,
+    "output_tokens": 30,
+    "cost_usd": 0.0009189,
+    "time_to_first_token": 0.40699999999196734,
+    "total_latency": 0.5469999999913853
+  },
+  "mt-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of which of those things deserves the most emphasis or why.",
+    "chunk_ids": [],
+    "input_tokens": 201,
+    "output_tokens": 22,
+    "cost_usd": 0.0001153,
+    "time_to_first_token": 0.46900000001187436,
+    "total_latency": 0.46900000001187436
+  },
+  "mt-02:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on Graham's calculations, a median US state adding a 1% wealth tax (which is equivalent to a 20% income tax) results in a total marginal tax rate of 61.75% (the 37% top US federal tax rate, plus the median state income tax rate of 4.75%, plus the 20% equivalent) [1]. \n\nThis rate of **61.75%** is higher than Denmark's marginal income tax rate of **60.5%**, which Graham notes as currently being the highest in the world [1].",
+    "chunk_ids": [
+      "748b7f8b-b724-4bf0-819b-9bc01dfff3a3",
+      "44ac6d12-e16a-4794-85d5-690b01f9611a",
+      "1c648074-e02e-417e-b77b-e6f979fc8706",
+      "9d1bc66d-02b9-4799-ae0f-ae2be7f50b8d",
+      "3f3e8351-05eb-4cee-8ec0-2859ca194035"
+    ],
+    "input_tokens": 1783,
+    "output_tokens": 116,
+    "cost_usd": 0.0008248999999999999,
+    "time_to_first_token": 1.0319999999919673,
+    "total_latency": 1.485000000000582
+  },
+  "mt-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on the provided sources, there is no mention of Denmark or Denmark's tax rate. Therefore, the sources do not contain the answer.",
+    "chunk_ids": [],
+    "input_tokens": 190,
+    "output_tokens": 28,
+    "cost_usd": 0.000127,
+    "time_to_first_token": 0.5319999999919673,
+    "total_latency": 0.7189999999973224
+  },
+  "fig-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on the architecture diagram (Figure 1), the two blocks stacked at the very top of the decoder right before the \"Output Probabilities\" are:\n\n1. **Add & Norm** (located right below the output) [2]\n2. **Feed Forward** (located just below that Add & Norm block) [2]",
+    "chunk_ids": [
+      "56404501-7ee8-4749-a49f-3965eb5cca23",
+      "05b3a183-b497-496d-ad95-6d76d12384c6",
+      "59903d96-ffb8-413d-b0cf-121fea0c8d41",
+      "3dfcb18b-a848-4a7c-bb9a-637f634be2d8",
+      "04330982-7fee-4fb6-a6ee-41bd94b59c71"
+    ],
+    "input_tokens": 1717,
+    "output_tokens": 67,
+    "cost_usd": 0.0006826,
+    "time_to_first_token": 1.5779999999940628,
+    "total_latency": 1.812999999994645
+  },
+  "fig-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "Based on Figure 1, the two blocks stacked at the very top of the decoder, right before the model outputs its probabilities (the \"Linear\" and \"Softmax\" blocks), are:\n\n1. **LayerNorm**\n2. **Linear**",
+    "chunk_ids": [],
+    "input_tokens": 178,
+    "output_tokens": 50,
+    "cost_usd": 0.0001784,
+    "time_to_first_token": 0.40600000000267755,
+    "total_latency": 0.6399999999994179
+  }
+}
