@@ -28,6 +28,7 @@ import random
 import re
 import sys
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +64,8 @@ CORPUS_PATH = CACHE_DIR / "corpus_chunks.json"
 GENERATIONS_PATH = CACHE_DIR / "generations.json"
 JUDGMENTS_PATH = CACHE_DIR / "judgments.json"
 JUDGE_VALIDATION_PATH = CACHE_DIR / "judge_validation.json"
+EXTRACTION_FIDELITY_PATH = CACHE_DIR / "extraction_fidelity.json"
+EVAL_RESULTS_PATH = SCRIPT_DIR / "eval_results.md"
 
 # Fixed, not tuned — its only job is making `sample-for-human` pick the same
 # 10 answers every run, so a second run (e.g. after `judge` catches up on a
@@ -1027,6 +1030,373 @@ def cmd_sample_for_human() -> int:
     return 0
 
 
+def _avg(values: list) -> float | None:
+    values = [v for v in values if v is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _fmt(value: float | None, spec: str = ".2f") -> str:
+    return format(value, spec) if value is not None else "n/a"
+
+
+def _hit_and_rank(retrieved_ids: list[str], truth_ids: list[str]) -> tuple[bool, int | None]:
+    """Whether any ground-truth chunk was retrieved, and at what 1-indexed
+    position the *first* one appeared (for MRR) — `None` if none were found.
+    """
+    for position, chunk_id in enumerate(retrieved_ids, start=1):
+        if chunk_id in truth_ids:
+            return True, position
+    return False, None
+
+
+def _recall(retrieved_ids: list[str], truth_ids: list[str]) -> float:
+    """Fraction of the ground-truth chunks (there can be more than one, for
+    multi-hop questions) that were actually retrieved — genuinely different
+    from hit rate only when a question needs more than one chunk.
+    """
+    if not truth_ids:
+        return 0.0
+    found = sum(1 for chunk_id in truth_ids if chunk_id in retrieved_ids)
+    return found / len(truth_ids)
+
+
+def _retrieval_stats(questions: list[dict], retrieval: dict, k: int) -> dict:
+    hits, recalls, reciprocal_ranks = [], [], []
+    for question in questions:
+        entry = retrieval.get(question["id"])
+        if not entry:
+            continue
+        retrieved_ids = [chunk["id"] for chunk in entry["hnsw10"][:k]]
+        truth_ids = question["ground_truth_chunk_id"]
+        hit, rank = _hit_and_rank(retrieved_ids, truth_ids)
+        hits.append(1 if hit else 0)
+        recalls.append(_recall(retrieved_ids, truth_ids))
+        reciprocal_ranks.append(1 / rank if rank else 0.0)
+    return {
+        "n": len(hits),
+        "hit_rate": _avg(hits) or 0.0,
+        "recall": _avg(recalls) or 0.0,
+        "mrr": _avg(reciprocal_ranks) or 0.0,
+    }
+
+
+def _markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    """Pipe-table lines, padded so every column lines up in a plain-text
+    view too — this file is meant to be read directly, not only previewed.
+    """
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    def _row(cells: list[str]) -> str:
+        return "| " + " | ".join(cell.ljust(widths[i]) for i, cell in enumerate(cells)) + " |"
+
+    return [_row(headers), "|" + "|".join("-" * (w + 2) for w in widths) + "|"] + [_row(row) for row in rows]
+
+
+def _section_extraction_fidelity() -> list[str]:
+    """Check 1. Manual by design — a script can't judge whether a parser
+    mangled a two-column PDF, only a human reading the actual output can.
+    """
+    lines = ["## 1. Extraction fidelity", ""]
+    if EXTRACTION_FIDELITY_PATH.exists():
+        fidelity = json.loads(EXTRACTION_FIDELITY_PATH.read_text(encoding="utf-8"))
+        rows = [[e["document"], e["score"], e.get("notes", "")] for e in fidelity]
+        lines += _markdown_table(["Document", "Score", "Notes"], rows)
+    else:
+        lines.append(
+            "**TODO — not done yet.** Read the parser's actual output by eye for a "
+            "2-column PDF, a table-heavy report, a scanned PDF, and a DOCX with tables. "
+            "Score each clean / degraded / unusable and note why, save as a JSON list of "
+            '`{"document": ..., "score": ..., "notes": ...}` at '
+            f"`scripts/eval_cache/{EXTRACTION_FIDELITY_PATH.name}`, then rerun `report`. "
+            "BUILD.md is explicit that this has to be trusted *before* any retrieval "
+            "number below it — a chunk that was garbage when written poisons every "
+            "metric that follows."
+        )
+    lines.append("")
+    return lines
+
+
+def _section_ann_vs_exact(questions: list[dict], retrieval: dict) -> list[str]:
+    """Check 2. HNSW is an approximate index; `match_chunks_exact` (migration
+    008) forces a full sequential scan, so comparing the two catches the
+    index silently dropping a chunk that should have been in the top 10.
+    """
+    lines = ["## 2. ANN recall vs exact search", ""]
+    overlaps = []
+    rows = []
+    for question in questions:
+        entry = retrieval.get(question["id"])
+        if not entry:
+            continue
+        hnsw_ids = [chunk["id"] for chunk in entry["hnsw10"]]
+        exact_ids = [chunk["id"] for chunk in entry["exact10"]]
+        overlap = len(set(hnsw_ids) & set(exact_ids))
+        overlaps.append(overlap)
+        if hnsw_ids == exact_ids:
+            verdict = "yes, same order"
+        elif set(hnsw_ids) == set(exact_ids):
+            verdict = "same set, different order"
+        else:
+            verdict = "no"
+        rows.append([question["id"], f"{overlap}/10", verdict])
+    lines += _markdown_table(["Question", "HNSW ∩ exact (of 10)", "Same top 10?"], rows)
+    lines.append("")
+    lines.append(f"Average overlap: {_fmt(_avg(overlaps), '.1f')}/10 across {len(overlaps)} question(s).")
+    lines.append("")
+    return lines
+
+
+def _section_retrieval(questions_with_truth: list[dict], retrieval: dict) -> list[str]:
+    """Checks 3-6: hit rate, MRR, the k=3/5/10 ablation, and a per-type
+    breakdown — all read straight off the cached hnsw10 lists, no re-querying.
+    """
+    lines = [
+        "## 3. Retrieval metrics",
+        "",
+        f"Ground truth exists for {len(questions_with_truth)}/18 questions (the 2 "
+        "adversarial questions are excluded by design — no correct chunk exists to hit).",
+        "",
+        "### Ablation — hit rate / recall / MRR at k=3, 5, 10",
+        "",
+    ]
+    ablation_rows = []
+    for k in (3, 5, 10):
+        stats = _retrieval_stats(questions_with_truth, retrieval, k)
+        marker = " (production default)" if k == rag.RETRIEVE_K else ""
+        ablation_rows.append([f"{k}{marker}", f"{stats['hit_rate']:.0%}", f"{stats['recall']:.0%}", f"{stats['mrr']:.2f}"])
+    lines += _markdown_table(["k", "Hit rate", "Recall", "MRR"], ablation_rows)
+    lines.append("")
+
+    lines += [f"### Per-question-type breakdown (k={rag.RETRIEVE_K})", ""]
+    by_type = defaultdict(list)
+    for question in questions_with_truth:
+        by_type[question["type"]].append(question)
+    type_rows = []
+    for question_type, grouped in by_type.items():
+        stats = _retrieval_stats(grouped, retrieval, rag.RETRIEVE_K)
+        type_rows.append(
+            [question_type, str(stats["n"]), f"{stats['hit_rate']:.0%}", f"{stats['recall']:.0%}", f"{stats['mrr']:.2f}"]
+        )
+    lines += _markdown_table(["Type", "n", "Hit rate", "Recall", "MRR"], type_rows)
+    lines.append("")
+    return lines
+
+
+def _section_generation(generations: dict, judgments: dict) -> list[str]:
+    """Checks 7-9: correctness (rag vs no_rag, the actual payoff number for
+    retrieval), RAGAS faithfulness/relevancy, and citation accuracy.
+    """
+    models = sorted({key.split(":", 2)[1] for key in generations})
+    lines = ["## 4. Generation metrics", ""]
+
+    lines += ["### Answer correctness — RAG vs no-RAG (check 8)", ""]
+    scores = defaultdict(list)
+    for key in generations:
+        _, model, condition = key.split(":", 2)
+        score = judgments.get(key, {}).get("correctness", {}).get("score")
+        scores[(model, condition)].append(score)
+    correctness_rows = [
+        [model, f"{_fmt(_avg(scores[(model, 'rag')]))}/5", f"{_fmt(_avg(scores[(model, 'no_rag')]))}/5"]
+        for model in models
+    ]
+    lines += _markdown_table(["Model", "RAG", "no-RAG"], correctness_rows)
+    lines.append("")
+
+    lines += ["### Faithfulness + answer relevance (RAGAS, rag-only) (check 7)", ""]
+    ragas_scores = defaultdict(lambda: {"faithfulness": [], "answer_relevancy": []})
+    for key, judgment in judgments.items():
+        if "ragas" not in judgment:
+            continue
+        _, model, _condition = key.split(":", 2)
+        ragas_scores[model]["faithfulness"].append(judgment["ragas"]["faithfulness"])
+        ragas_scores[model]["answer_relevancy"].append(judgment["ragas"]["answer_relevancy"])
+    ragas_rows = [
+        [model, _fmt(_avg(ragas_scores[model]["faithfulness"])), _fmt(_avg(ragas_scores[model]["answer_relevancy"]))]
+        for model in models
+    ]
+    lines += _markdown_table(["Model", "Faithfulness", "Answer relevancy"], ragas_rows)
+    lines.append("")
+
+    lines += ["### Citation accuracy (check 9)", ""]
+    total_sentences = supported_sentences = 0
+    per_model = defaultdict(lambda: [0, 0])  # [supported, total]
+    for key, judgment in judgments.items():
+        citation = judgment.get("citation_accuracy")
+        if not citation:
+            continue
+        _, model, _condition = key.split(":", 2)
+        for sentence in citation.get("sentences", []):
+            total_sentences += 1
+            per_model[model][1] += 1
+            if sentence.get("supported"):
+                supported_sentences += 1
+                per_model[model][0] += 1
+    overall_pct = (supported_sentences / total_sentences) if total_sentences else 0.0
+    lines.append(f"Overall: {supported_sentences}/{total_sentences} cited sentences supported ({overall_pct:.0%}).")
+    lines.append("")
+    citation_rows = []
+    for model in models:
+        supported, total = per_model[model]
+        pct = (supported / total) if total else 0.0
+        citation_rows.append([model, str(supported), str(total), f"{pct:.0%}"])
+    lines += _markdown_table(["Model", "Supported", "Total", "%"], citation_rows)
+    lines.append("")
+    return lines
+
+
+def _section_per_question_detail(questions_by_id: dict, generations: dict, judgments: dict) -> list[str]:
+    lines = ["## 5. Per-question detail", ""]
+    rows = []
+    for key in sorted(generations):
+        question_id, model, condition = key.split(":", 2)
+        judgment = judgments.get(key, {})
+        correctness = judgment.get("correctness", {}).get("score")
+        ragas_result = judgment.get("ragas")
+        faithfulness = _fmt(ragas_result["faithfulness"]) if ragas_result else "n/a"
+        citation = judgment.get("citation_accuracy")
+        if citation:
+            sentences = citation.get("sentences", [])
+            citation_str = f"{sum(1 for s in sentences if s.get('supported'))}/{len(sentences)}" if sentences else "n/a"
+        else:
+            citation_str = "no citations" if condition == "rag" else "n/a"
+        rows.append(
+            [
+                question_id,
+                questions_by_id[question_id]["type"],
+                model,
+                condition,
+                str(correctness) if correctness is not None else "n/a",
+                faithfulness,
+                citation_str,
+            ]
+        )
+    lines += _markdown_table(
+        ["Question", "Type", "Model", "Condition", "Correctness", "Faithfulness", "Citations OK"], rows
+    )
+    lines.append("")
+    return lines
+
+
+def _section_judge_validation() -> list[str]:
+    """Check 10. Reports how much to trust check 8's numbers — a stand-in for
+    "I hand-checked the judge and it agrees with me" instead of an assumption.
+    """
+    lines = ["## 6. Judge validation (check 10)", ""]
+    if not JUDGE_VALIDATION_PATH.exists():
+        lines += ["**TODO — not done yet.** Run `sample-for-human`, hand-score, rerun `report`.", ""]
+        return lines
+
+    validation = json.loads(JUDGE_VALIDATION_PATH.read_text(encoding="utf-8"))
+    scored = [v for v in validation if v.get("human_score") is not None]
+    if scored:
+        exact = sum(1 for v in scored if v["human_score"] == v["judge_score"])
+        within_one = sum(1 for v in scored if abs(v["human_score"] - v["judge_score"]) <= 1)
+        lines.append(f"Exact agreement: {exact}/{len(scored)} ({exact / len(scored):.0%}).")
+        lines.append(f"Within one point: {within_one}/{len(scored)} ({within_one / len(scored):.0%}).")
+    if len(scored) < len(validation):
+        lines.append(f"({len(scored)}/{len(validation)} hand-scored so far.)")
+    lines.append("")
+
+    rows = []
+    for entry in validation:
+        human = entry.get("human_score")
+        if human is None:
+            match = "pending"
+        elif human == entry["judge_score"]:
+            match = "exact"
+        elif abs(human - entry["judge_score"]) <= 1:
+            match = "±1"
+        else:
+            match = "disagree"
+        question_preview = entry["question"] if len(entry["question"]) <= 70 else entry["question"][:67] + "..."
+        rows.append([question_preview, str(human) if human is not None else "—", str(entry["judge_score"]), match])
+    lines += _markdown_table(["Question", "Human", "Judge", "Match"], rows)
+    lines.append("")
+    return lines
+
+
+def _section_cost_latency(generations: dict) -> list[str]:
+    """Check 11 — the payoff for the multi-model design, which otherwise
+    measures answer quality and throws away the cost/speed axis entirely.
+    """
+    lines = ["## 7. Cost + latency per model (check 11)", ""]
+    by_model = defaultdict(lambda: {"cost": [], "ttft": [], "latency": []})
+    for key, generation in generations.items():
+        _, model, _condition = key.split(":", 2)
+        by_model[model]["cost"].append(generation.get("cost_usd") or 0.0)
+        by_model[model]["ttft"].append(generation.get("time_to_first_token"))
+        by_model[model]["latency"].append(generation["total_latency"])
+
+    total_cost = 0.0
+    rows = []
+    for model, stats in by_model.items():
+        model_cost = sum(stats["cost"])
+        total_cost += model_cost
+        rows.append(
+            [
+                model,
+                _fmt(_avg(stats["ttft"])),
+                _fmt(_avg(stats["latency"])),
+                f"{model_cost:.4f}",
+                f"{model_cost / len(stats['cost']):.4f}",
+            ]
+        )
+    lines += _markdown_table(
+        ["Model", "Avg TTFT (s)", "Avg total latency (s)", "Total cost ($)", "Avg cost/call ($)"], rows
+    )
+    lines.append("")
+    lines.append(f"**Total generation spend: ${total_cost:.4f}** (72 calls — judge-phase spend is separate).")
+    lines.append("")
+    return lines
+
+
+def _section_failure_modes() -> list[str]:
+    return [
+        "## 8. Failure mode analysis",
+        "",
+        "*(Fill in by hand: which questions failed, why, and what would fix it. "
+        "BUILD.md calls this the section interviewers actually read.)*",
+        "",
+    ]
+
+
+def cmd_report() -> int:
+    """Phase 3: assembles `eval_results.md` from every cache file already on
+    disk. Zero network calls — free to rerun as many times as it takes to get
+    the formatting right, or after filling in extraction fidelity / hand
+    scores.
+    """
+    required = [EVAL_QA_PATH, RETRIEVAL_PATH, GENERATIONS_PATH, JUDGMENTS_PATH]
+    missing = [p.name for p in required if not p.exists()]
+    if missing:
+        print(f"Missing: {', '.join(missing)}. Run the earlier phases first.")
+        return 1
+
+    questions = json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))
+    questions_by_id = {q["id"]: q for q in questions}
+    questions_with_truth = [q for q in questions if q.get("ground_truth_chunk_id")]
+    retrieval = json.loads(RETRIEVAL_PATH.read_text(encoding="utf-8"))
+    generations = json.loads(GENERATIONS_PATH.read_text(encoding="utf-8"))
+    judgments = json.loads(JUDGMENTS_PATH.read_text(encoding="utf-8"))
+
+    lines = ["# Day 11 eval results", ""]
+    lines += _section_extraction_fidelity()
+    lines += _section_ann_vs_exact(questions, retrieval)
+    lines += _section_retrieval(questions_with_truth, retrieval)
+    lines += _section_generation(generations, judgments)
+    lines += _section_per_question_detail(questions_by_id, generations, judgments)
+    lines += _section_judge_validation()
+    lines += _section_cost_latency(generations)
+    lines += _section_failure_modes()
+
+    EVAL_RESULTS_PATH.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote {EVAL_RESULTS_PATH.name}.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1042,6 +1412,8 @@ def main() -> int:
 
     subparsers.add_parser("sample-for-human", help="Phase 2c: pick 10 judged answers for you to hand-score blind.")
 
+    subparsers.add_parser("report", help="Phase 3: assemble eval_results.md from everything on disk.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
@@ -1054,6 +1426,8 @@ def main() -> int:
         return cmd_judge()
     if args.command == "sample-for-human":
         return cmd_sample_for_human()
+    if args.command == "report":
+        return cmd_report()
 
     return 1  # pragma: no cover — argparse's `required=True` already rejects this
 
@@ -1106,6 +1480,22 @@ if __name__ == "__main__" and len(sys.argv) == 1:
     first_pick = random.Random(SAMPLE_SEED).sample(fake_keys, SAMPLE_SIZE)
     second_pick = random.Random(SAMPLE_SEED).sample(fake_keys, SAMPLE_SIZE)
     assert first_pick == second_pick, "the same seed must pick the same sample every run"
+
+    hit, rank = _hit_and_rank(["a", "b", "c"], ["c"])
+    assert hit and rank == 3, "ground-truth chunk at position 3 must report hit + rank 3"
+    hit, rank = _hit_and_rank(["a", "b"], ["z"])
+    assert not hit and rank is None, "a chunk that was never retrieved must not report a rank"
+    assert _recall(["a", "b"], ["a", "z"]) == 0.5, "recall must be found/total, not a 0/1 hit"
+    assert _avg([1, None, 3]) == 2, "None values must be dropped before averaging, not treated as 0"
+    assert _avg([]) is None, "an empty list has no average — must not divide by zero"
+    assert _fmt(None) == "n/a", "a missing value must render as n/a, not crash the report"
+
+    table = _markdown_table(["A", "B"], [["x", "yy"], ["long value", "z"]])
+    cell_lengths = [[len(cell) for cell in row.strip("|").split("|")] for row in table]
+    assert all(lengths == cell_lengths[0] for lengths in cell_lengths), (
+        "every row in a markdown table must pad to the same column width so the columns "
+        "actually line up in a plain-text view"
+    )
 
     print("OK — cache/atomic-write/token-expiry/keyword-scoring/citation-detection logic checked without a network call.")
 elif __name__ == "__main__":
