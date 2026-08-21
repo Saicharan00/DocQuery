@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -61,6 +62,14 @@ RETRIEVAL_PATH = CACHE_DIR / "retrieval.json"
 CORPUS_PATH = CACHE_DIR / "corpus_chunks.json"
 GENERATIONS_PATH = CACHE_DIR / "generations.json"
 JUDGMENTS_PATH = CACHE_DIR / "judgments.json"
+JUDGE_VALIDATION_PATH = CACHE_DIR / "judge_validation.json"
+
+# Fixed, not tuned — its only job is making `sample-for-human` pick the same
+# 10 answers every run, so a second run (e.g. after `judge` catches up on a
+# few more generations) doesn't hand you a different set and orphan whatever
+# you've already hand-scored.
+SAMPLE_SEED = 11
+SAMPLE_SIZE = 10
 
 # A real tier above both models under test (see rag.SUPPORTED_MODELS), reusing
 # the already-configured openai_api_key — no new secret, no new provider.
@@ -950,6 +959,74 @@ def cmd_judge() -> int:
     # was mid-flight, not a full rerun.
 
 
+def cmd_sample_for_human() -> int:
+    """Phase 2c: pick 10 already-judged answers and set up a blank slate for a
+    human to score them independently. The judge's correctness score is one
+    model's opinion — this is what turns "trust me, it's a good judge" into a
+    real agreement percentage (check #10).
+
+    Not resumable in the incremental sense the other phases are: it's a
+    single pick, not a growing cache, so it refuses to touch an existing
+    `judge_validation.json` rather than risk overwriting hand-scored work.
+    """
+    if not GENERATIONS_PATH.exists() or not JUDGMENTS_PATH.exists():
+        print("Run `generate` and `judge` first.")
+        return 1
+
+    if JUDGE_VALIDATION_PATH.exists():
+        print(f"{JUDGE_VALIDATION_PATH.name} already exists — not overwriting your hand-scored work.")
+        print("Delete it first if you want a fresh sample.")
+        return 0
+
+    questions_by_id = {q["id"]: q for q in json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))}
+    generations: dict = json.loads(GENERATIONS_PATH.read_text(encoding="utf-8"))
+    judgments: dict = json.loads(JUDGMENTS_PATH.read_text(encoding="utf-8"))
+
+    judged_keys = sorted(key for key in generations if "correctness" in judgments.get(key, {}))
+    if len(judged_keys) < SAMPLE_SIZE:
+        print(f"Only {len(judged_keys)} generation(s) judged so far — need at least {SAMPLE_SIZE}. Run `judge` first.")
+        return 1
+
+    sample_keys = random.Random(SAMPLE_SEED).sample(judged_keys, SAMPLE_SIZE)
+
+    validation = []
+    for key in sample_keys:
+        question_id, model, condition = key.split(":", 2)
+        question = questions_by_id[question_id]
+        generation = generations[key]
+        correctness = judgments[key]["correctness"]
+        validation.append(
+            {
+                "key": key,
+                "question": question["question"],
+                "ground_truth_answer": question["ground_truth_answer"],
+                "model": model,
+                "condition": condition,
+                "answer": generation["answer"],
+                "human_score": None,
+                "judge_score": correctness.get("score"),
+                "judge_reasoning": correctness.get("reasoning"),
+            }
+        )
+
+    # In plain English, the block above: for each of the 10 picked answers,
+    # split its cache key ("question_id:model:condition") back into its three
+    # parts, then gather everything a human needs to score it blind — the
+    # question, the known-correct answer, and the model's actual answer —
+    # into one entry. `human_score` is left empty; the judge's own score and
+    # reasoning ride along after it, on purpose, only for the report step to
+    # compare against later.
+
+    _write_json_atomic(JUDGE_VALIDATION_PATH, validation)
+    print(f"Wrote {len(validation)} question(s) to {JUDGE_VALIDATION_PATH.name}.")
+    print(
+        'Fill in each entry\'s "human_score" by hand, on the judge\'s own 1-5 scale, '
+        "before reading its judge_score/judge_reasoning — that's what keeps the "
+        "comparison honest."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -963,6 +1040,8 @@ def main() -> int:
 
     subparsers.add_parser("judge", help="Phase 2b: score every answer — RAGAS, correctness, citation accuracy.")
 
+    subparsers.add_parser("sample-for-human", help="Phase 2c: pick 10 judged answers for you to hand-score blind.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
@@ -973,6 +1052,8 @@ def main() -> int:
         return cmd_generate()
     if args.command == "judge":
         return cmd_judge()
+    if args.command == "sample-for-human":
+        return cmd_sample_for_human()
 
     return 1  # pragma: no cover — argparse's `required=True` already rejects this
 
@@ -1020,6 +1101,11 @@ if __name__ == "__main__" and len(sys.argv) == 1:
     assert "citation_accuracy" in fake_judgments["q1:model:rag"], (
         "a legitimate None result must count as already-judged, not pending"
     )
+
+    fake_keys = sorted(f"q{i}:model:rag" for i in range(20))
+    first_pick = random.Random(SAMPLE_SEED).sample(fake_keys, SAMPLE_SIZE)
+    second_pick = random.Random(SAMPLE_SEED).sample(fake_keys, SAMPLE_SIZE)
+    assert first_pick == second_pick, "the same seed must pick the same sample every run"
 
     print("OK — cache/atomic-write/token-expiry/keyword-scoring/citation-detection logic checked without a network call.")
 elif __name__ == "__main__":
