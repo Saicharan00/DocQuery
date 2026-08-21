@@ -21,12 +21,14 @@ question in flight — rerunning with a fresh token picks up where it left off.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 # The test corpus is Paul Graham essays and an arXiv paper — both routinely
@@ -41,6 +43,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
 
 import litellm  # noqa: E402
 from jose import jwt  # noqa: E402
+from langchain_core.outputs import Generation, LLMResult  # noqa: E402
+from langchain_core.prompt_values import PromptValue  # noqa: E402
+from ragas.dataset_schema import SingleTurnSample  # noqa: E402
+from ragas.embeddings import BaseRagasEmbeddings  # noqa: E402
+from ragas.llms import BaseRagasLLM  # noqa: E402
+from ragas.metrics import AnswerRelevancy, Faithfulness  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
 from app.services import rag  # noqa: E402
@@ -52,6 +60,21 @@ CACHE_DIR = SCRIPT_DIR / "eval_cache"
 RETRIEVAL_PATH = CACHE_DIR / "retrieval.json"
 CORPUS_PATH = CACHE_DIR / "corpus_chunks.json"
 GENERATIONS_PATH = CACHE_DIR / "generations.json"
+JUDGMENTS_PATH = CACHE_DIR / "judgments.json"
+
+# A real tier above both models under test (see rag.SUPPORTED_MODELS), reusing
+# the already-configured openai_api_key — no new secret, no new provider.
+# Used both as the correctness/citation judge and as the LLM RAGAS's own
+# metrics call internally (statement extraction, NLI checks, question
+# generation).
+JUDGE_MODEL = "gpt-5.4"
+
+# Matches production's own embedding model (see rag.py) — not load-bearing for
+# RAGAS's math (answer_relevancy only needs *a* consistent embedding space to
+# measure similarity in, not this exact one), but there's no reason to
+# introduce a second embedding model when this one is already configured,
+# already in litellm's registry as "cohere/embed-v4.0", and already paid for.
+RAGAS_EMBED_MODEL = "cohere/embed-v4.0"
 
 # rag/no_rag mirrors what a real answer sees at production's default k versus
 # what's left if retrieval contributed nothing — the whole point of this phase.
@@ -594,6 +617,339 @@ def cmd_resolve_hints() -> int:
     return 0
 
 
+@dataclass
+class LiteLLMRagasLLM(BaseRagasLLM):
+    """Adapts `litellm.completion`/`acompletion` to RAGAS's `BaseRagasLLM`
+    interface. `ragas.llms.llm_factory(provider="litellm")` looked like the
+    built-in answer but returns an `InstructorBaseRagasLLM`, which
+    `Faithfulness`/`AnswerRelevancy` don't accept — this small wrapper is what
+    actually lets RAGAS call our already-configured judge model without
+    pulling in `langchain-openai` as a second, redundant provider integration.
+
+    Base-class fields (`run_config`, `multiple_completion_supported`, `cache`)
+    all carry defaults, so these new fields need defaults too even though
+    every real call passes them by keyword.
+    """
+
+    model: str = ""
+    api_key: str = ""
+
+    def _messages(self, prompt: PromptValue) -> list[dict]:
+        return [{"role": "user", "content": prompt.to_string()}]
+
+    def generate_text(
+        self, prompt: PromptValue, n: int = 1, temperature: float = 0.01, stop=None, callbacks=None
+    ) -> LLMResult:
+        response = litellm.completion(
+            model=self.model, api_key=self.api_key, messages=self._messages(prompt),
+            temperature=temperature, stop=stop,
+        )
+        return LLMResult(generations=[[Generation(text=response.choices[0].message.content)]])
+
+    async def agenerate_text(
+        self, prompt: PromptValue, n: int = 1, temperature: float | None = 0.01, stop=None, callbacks=None
+    ) -> LLMResult:
+        response = await litellm.acompletion(
+            model=self.model, api_key=self.api_key, messages=self._messages(prompt),
+            temperature=temperature, stop=stop,
+        )
+        return LLMResult(generations=[[Generation(text=response.choices[0].message.content)]])
+
+    def is_finished(self, response: LLMResult) -> bool:
+        # RAGAS's own prompts (statement extraction, NLI checks, question
+        # generation) are short, structured asks — truncation risk is low
+        # enough here that real finish-reason bookkeeping isn't worth it.
+        return True
+
+
+class LiteLLMRagasEmbeddings(BaseRagasEmbeddings):
+    """Adapts `litellm.embedding`/`aembedding` to RAGAS's *old* embeddings
+    interface (`embed_query`/`embed_documents`, inherited from LangChain's
+    `Embeddings` class). `ragas.embeddings.LiteLLMEmbeddings` looked usable
+    directly (it's a real `BaseRagasEmbedding`, and `AnswerRelevancy` accepts
+    that type) but is a dead end in practice: `ResponseRelevancy.
+    calculate_similarity` calls `.embed_query`/`.embed_documents`, methods
+    that only the *old* interface has — a version-transition gap in
+    ragas==0.3.9, not a configuration mistake. This adapter sidesteps it by
+    talking to litellm directly instead of going through that class.
+    """
+
+    def __init__(self, model: str, api_key: str):
+        super().__init__()
+        self.model = model
+        self.api_key = api_key
+
+    def embed_query(self, text: str) -> list[float]:
+        response = litellm.embedding(model=self.model, input=[text], api_key=self.api_key)
+        return response.data[0]["embedding"]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        response = litellm.embedding(model=self.model, input=texts, api_key=self.api_key)
+        return [item["embedding"] for item in response.data]
+
+    async def aembed_query(self, text: str) -> list[float]:
+        response = await litellm.aembedding(model=self.model, input=[text], api_key=self.api_key)
+        return response.data[0]["embedding"]
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        response = await litellm.aembedding(model=self.model, input=texts, api_key=self.api_key)
+        return [item["embedding"] for item in response.data]
+
+
+CITATION_PATTERN = re.compile(r"\[\d+\]")
+
+
+def _has_citations(answer: str) -> bool:
+    return bool(CITATION_PATTERN.search(answer))
+
+
+def _correctness_prompt(question: dict, generation: dict) -> str:
+    return (
+        f"Question: {question['question']}\n"
+        f"Reference answer: {question['ground_truth_answer']}\n"
+        f"Candidate answer: {generation['answer']}\n\n"
+        "Score how correct the candidate answer is against the reference answer, "
+        "on a 1-5 scale (1 = wrong or contradicts the reference, 5 = fully "
+        'correct and complete). Respond as JSON: {"score": <integer 1-5>, '
+        '"reasoning": "<one sentence>"}.'
+    )
+
+
+def _score_correctness(question: dict, generation: dict, api_key: str) -> dict:
+    """One judge call: is this answer actually right, against the answer we
+    already know is correct? Meaningful for both conditions — a `no_rag`
+    answer can still happen to be correct from the model's own training data.
+    """
+    response = litellm.completion(
+        model=JUDGE_MODEL,
+        api_key=api_key,
+        messages=[{"role": "user", "content": _correctness_prompt(question, generation)}],
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)
+
+
+def _citation_prompt(generation: dict, corpus_by_id: dict) -> str:
+    sources = "\n\n".join(
+        f"[{number}] {corpus_by_id[chunk_id]['content']}"
+        for number, chunk_id in enumerate(generation["chunk_ids"], start=1)
+    )
+    return (
+        f"Sources:\n{sources}\n\n"
+        f"Answer to check:\n{generation['answer']}\n\n"
+        'For every sentence in the answer that cites a source number like "[2]", '
+        "decide whether the cited source actually supports that sentence. "
+        'Respond as JSON: {"sentences": [{"sentence": "...", "cited": '
+        '[<source numbers>], "supported": true|false}, ...]}.'
+    )
+
+
+def _score_citations(generation: dict, corpus_by_id: dict, api_key: str) -> dict | None:
+    """`None` (no call made) when the answer has nothing to check — a `no_rag`
+    or refusal answer has no `[n]` citations to verify against anything.
+    """
+    if not _has_citations(generation["answer"]):
+        return None
+
+    response = litellm.completion(
+        model=JUDGE_MODEL,
+        api_key=api_key,
+        messages=[
+            {"role": "system", "content": "You are a strict fact-checking judge."},
+            {"role": "user", "content": _citation_prompt(generation, corpus_by_id)},
+        ],
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)
+
+
+def _score_ragas(question: dict, generation: dict, corpus_by_id: dict, llm: BaseRagasLLM, embeddings) -> dict:
+    """Faithfulness (does the answer only say things the retrieved text
+    supports) and answer relevancy (does the answer actually address the
+    question) — `rag`-only, since `no_rag` has no retrieved context for
+    faithfulness to be measured against.
+    """
+    sample = SingleTurnSample(
+        user_input=question["question"],
+        response=generation["answer"],
+        retrieved_contexts=[corpus_by_id[chunk_id]["content"] for chunk_id in generation["chunk_ids"]],
+    )
+    faithfulness = asyncio.run(Faithfulness(llm=llm).single_turn_ascore(sample))
+    relevancy = asyncio.run(AnswerRelevancy(llm=llm, embeddings=embeddings).single_turn_ascore(sample))
+    return {"faithfulness": faithfulness, "answer_relevancy": relevancy}
+
+
+# Worst-case output sizes for the cost estimate below — a short JSON verdict
+# for correctness, a longer one for citation checking since it lists every
+# cited sentence in the answer.
+CORRECTNESS_MAX_OUTPUT_TOKENS = 150
+CITATION_MAX_OUTPUT_TOKENS = 500
+
+
+def cmd_judge() -> int:
+    """Phase 2b: three independently-resumable scoring passes over every saved
+    answer — RAGAS (faithfulness + relevancy, rag-only), an LLM correctness
+    judge (every answer), and citation accuracy (rag-only, and only for
+    answers that actually cite something). No Supabase calls, same as
+    `generate` — everything needed is already on disk.
+    """
+    if not GENERATIONS_PATH.exists():
+        print(f"{GENERATIONS_PATH.name} not found. Run `generate` first.")
+        return 1
+    if not CORPUS_PATH.exists():
+        print(f"{CORPUS_PATH.name} not found. Run `retrieve` first.")
+        return 1
+
+    questions_by_id = {q["id"]: q for q in json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))}
+    corpus_by_id = {c["id"]: c for c in json.loads(CORPUS_PATH.read_text(encoding="utf-8"))}
+    generations: dict = json.loads(GENERATIONS_PATH.read_text(encoding="utf-8"))
+    judgments: dict = json.loads(JUDGMENTS_PATH.read_text(encoding="utf-8")) if JUDGMENTS_PATH.exists() else {}
+
+    settings = get_settings()
+    if not settings.openai_api_key:
+        print("openai_api_key is not configured — the judge model needs it.")
+        return 1
+
+    llm = LiteLLMRagasLLM(model=JUDGE_MODEL, api_key=settings.openai_api_key)
+    embeddings = LiteLLMRagasEmbeddings(model=RAGAS_EMBED_MODEL, api_key=settings.cohere_api_key)
+
+    # Three independent passes, each keyed by presence in `judgments[key]`.
+    # `citation_accuracy` uses `in`, not truthiness — `None` (no citations to
+    # check) is itself a legitimate, already-computed result, not a gap.
+    pending_correctness, pending_ragas, pending_citation = [], [], []
+    for key, generation in generations.items():
+        _, _, condition = key.split(":", 2)
+        judgment = judgments.get(key, {})
+        if "correctness" not in judgment:
+            pending_correctness.append(key)
+        if condition == "rag" and "ragas" not in judgment:
+            pending_ragas.append(key)
+        if condition == "rag" and "citation_accuracy" not in judgment:
+            pending_citation.append(key)
+
+    if not (pending_correctness or pending_ragas or pending_citation):
+        print(f"All {len(generations)} generation(s) already fully judged — nothing to do.")
+        return 0
+
+    citation_calls = [key for key in pending_citation if _has_citations(generations[key]["answer"])]
+
+    # A representative correctness-call cost, computed over *every* generation
+    # (not just pending ones) — the RAGAS estimate below needs this basis even
+    # on a rerun where correctness itself is already fully cached and nothing
+    # in `pending_correctness` remains to average over.
+    sample_correctness_costs = []
+    for key, generation in generations.items():
+        question_id = key.split(":", 1)[0]
+        prompt = _correctness_prompt(questions_by_id[question_id], generation)
+        input_tokens = litellm.token_counter(model=JUDGE_MODEL, messages=[{"role": "user", "content": prompt}])
+        cost = _call_cost(JUDGE_MODEL, input_tokens, CORRECTNESS_MAX_OUTPUT_TOKENS)
+        if cost is not None:
+            sample_correctness_costs.append(cost)
+    avg_correctness_cost = (
+        sum(sample_correctness_costs) / len(sample_correctness_costs) if sample_correctness_costs else 0.0
+    )
+
+    correctness_cost, citation_cost, unpriced = 0.0, 0.0, 0
+    for key in pending_correctness:
+        question_id = key.split(":", 1)[0]
+        prompt = _correctness_prompt(questions_by_id[question_id], generations[key])
+        input_tokens = litellm.token_counter(model=JUDGE_MODEL, messages=[{"role": "user", "content": prompt}])
+        cost = _call_cost(JUDGE_MODEL, input_tokens, CORRECTNESS_MAX_OUTPUT_TOKENS)
+        if cost is None:
+            unpriced += 1
+        else:
+            correctness_cost += cost
+    for key in citation_calls:
+        prompt = _citation_prompt(generations[key], corpus_by_id)
+        input_tokens = litellm.token_counter(model=JUDGE_MODEL, messages=[{"role": "user", "content": prompt}])
+        cost = _call_cost(JUDGE_MODEL, input_tokens, CITATION_MAX_OUTPUT_TOKENS)
+        if cost is None:
+            unpriced += 1
+        else:
+            citation_cost += cost
+
+    # RAGAS's own internal call count isn't observable from outside (statement
+    # extraction + NLI checks for faithfulness, ~`strictness` question-gen
+    # calls for relevancy) — approximated, not guessed at zero, as 5x a
+    # representative correctness call's cost per pending rag-condition sample.
+    ragas_cost = avg_correctness_cost * 5 * len(pending_ragas)
+    estimated_cost = correctness_cost + citation_cost + ragas_cost
+
+    print(
+        f"{len(pending_correctness)} correctness call(s), {len(citation_calls)} citation call(s) "
+        f"(of {len(pending_citation)} rag-condition answer(s) pending — the rest have no "
+        f"citations to check), {len(pending_ragas)} RAGAS sample(s) pending."
+    )
+    print(f"Estimated cost: ${estimated_cost:.2f} (RAGAS portion ${ragas_cost:.2f} is approximate)", end="")
+    print(f", plus {unpriced} call(s) litellm has no pricing for." if unpriced else ".")
+
+    if input('Type "yes" to spend real money and proceed, anything else to cancel: ').strip().lower() != "yes":
+        print("Cancelled — no calls made.")
+        return 0
+
+    def _run(key: str, label: str, fn):
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001 — logged and skipped, not fatal
+                if _is_rate_limit_error(exc) and attempt < MAX_RATE_LIMIT_RETRIES:
+                    print(
+                        f"  {key} [{label}]: rate-limited, waiting {RATE_LIMIT_BACKOFF_SECONDS}s "
+                        f"(retry {attempt + 1}/{MAX_RATE_LIMIT_RETRIES})..."
+                    )
+                    time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+                    continue
+                print(f"  {key} [{label}]: FAILED ({type(exc).__name__}: {exc})")
+                return None
+        return None
+
+    started = time.monotonic()
+
+    for key in pending_correctness:
+        question_id = key.split(":", 1)[0]
+        result = _run(key, "correctness", lambda: _score_correctness(questions_by_id[question_id], generations[key], settings.openai_api_key))
+        if result is None:
+            continue
+        judgments.setdefault(key, {})["correctness"] = result
+        _write_json_atomic(JUDGMENTS_PATH, judgments)
+        print(f"  {key} [correctness]: score {result.get('score')}")
+
+    for key in pending_citation:
+        if key not in citation_calls:
+            judgments.setdefault(key, {})["citation_accuracy"] = None
+            _write_json_atomic(JUDGMENTS_PATH, judgments)
+            print(f"  {key} [citation]: skipped (no citations in answer)")
+            continue
+        result = _run(key, "citation", lambda: _score_citations(generations[key], corpus_by_id, settings.openai_api_key))
+        if result is None:
+            continue
+        judgments.setdefault(key, {})["citation_accuracy"] = result
+        _write_json_atomic(JUDGMENTS_PATH, judgments)
+        print(f"  {key} [citation]: scored")
+
+    for key in pending_ragas:
+        question_id = key.split(":", 1)[0]
+        result = _run(key, "ragas", lambda: _score_ragas(questions_by_id[question_id], generations[key], corpus_by_id, llm, embeddings))
+        if result is None:
+            continue
+        judgments.setdefault(key, {})["ragas"] = result
+        _write_json_atomic(JUDGMENTS_PATH, judgments)
+        print(f"  {key} [ragas]: faithfulness {result['faithfulness']:.2f}, relevancy {result['answer_relevancy']:.2f}")
+
+    elapsed = time.monotonic() - started
+    print(f"\nDone in {elapsed:.0f}s.")
+    return 0
+
+    # In plain English, this command: figures out which of the three scoring
+    # passes still need to run for which saved answers (skipping anything
+    # already judged from a previous run), prints a cost estimate, and waits
+    # for you to type "yes" before spending anything. Then it runs correctness
+    # scoring on every answer, citation-checking on rag answers that actually
+    # cite something, and RAGAS scoring on rag answers — saving each result to
+    # disk the instant it's computed, so an interruption only costs whatever
+    # was mid-flight, not a full rerun.
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -605,6 +961,8 @@ def main() -> int:
 
     subparsers.add_parser("generate", help="Phase 2a: answer every question, every model, rag vs no-rag.")
 
+    subparsers.add_parser("judge", help="Phase 2b: score every answer — RAGAS, correctness, citation accuracy.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
@@ -613,6 +971,8 @@ def main() -> int:
         return cmd_resolve_hints()
     if args.command == "generate":
         return cmd_generate()
+    if args.command == "judge":
+        return cmd_judge()
 
     return 1  # pragma: no cover — argparse's `required=True` already rejects this
 
@@ -653,6 +1013,14 @@ if __name__ == "__main__" and len(sys.argv) == 1:
         "keyword overlap did not rank the relevant chunk higher"
     )
 
-    print("OK — cache/atomic-write/token-expiry/keyword-scoring logic checked without a network call.")
+    assert _has_citations("The company grew fast [1] before pivoting [2]."), "citation not detected"
+    assert not _has_citations("No citations in this answer at all."), "false positive on plain text"
+
+    fake_judgments = {"q1:model:rag": {"citation_accuracy": None}}
+    assert "citation_accuracy" in fake_judgments["q1:model:rag"], (
+        "a legitimate None result must count as already-judged, not pending"
+    )
+
+    print("OK — cache/atomic-write/token-expiry/keyword-scoring/citation-detection logic checked without a network call.")
 elif __name__ == "__main__":
     raise SystemExit(main())
