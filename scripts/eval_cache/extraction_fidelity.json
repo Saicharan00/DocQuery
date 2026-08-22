@@ -1,0 +1,22 @@
+[
+  {
+    "document": "attention_is_all_you_need.pdf — 2-column academic PDF",
+    "score": "degraded",
+    "notes": "Column reading order is actually correct — prose flows sequentially across both columns ('1 Introduction → 2 Background → 3 Model Architecture'), despite the ingestion.py code comment warning get_text() reads across columns. But Table 2 (p.8, BLEU/FLOPs comparison) loses its column alignment: header row and sparse data rows flatten into one list, so a row like 'ByteNet [18] / 23.75' no longer says whether 23.75 is the EN-DE or EN-FR score. Verified by reading the real cached production chunks (corpus_chunks.json, document 74dfb13a...), not a synthetic re-parse."
+  },
+  {
+    "document": "major project-LAST2.3nishanth updated.pdf — 91-page table-heavy report",
+    "score": "degraded",
+    "notes": "Inconsistent by table, not by page. Simple, fully-populated tables extract cleanly in correct row-major order (Table 4 DHT11 pinout p.53: 'No: / Pin Name / Description / 1 / Vcc / Power supply...'; Table 8 LCD pins p.66 same pattern) — readable as-is, cell values correctly paired with their row. But Table 1 (IC7805 specs, p.34) is pulled entirely out of its visual position: 'SPECIFICATIONS / IC 7805 / Vout / 5V / Vein - Vout Difference / 5V - 20V / ...' appears in the raw text AFTER an unrelated paragraph about a different topic (variable bench power supplies), disconnected from its own 'Table 1' label two paragraphs above it. A reader going top-to-bottom would misattribute or lose that data. get_text()'s block reading order does not reliably track a table's visual position on the page."
+  },
+  {
+    "document": "Non-text-searchable.pdf — scanned page (GitHub sample)",
+    "score": "clean (by design)",
+    "notes": "_parse_pdf returned 0 chars. Confirmed with page.get_image_info() that the page really is a single 540x700 embedded image with no text layer — not a bug. This is exactly the signal the Day 6b scanned-PDF exemption relies on: empty text makes parse() return [] instead of raising, so the document falls back to image-only ingestion instead of failing the upload."
+  },
+  {
+    "document": "table_test_fixture.docx — 5 table shapes (simple, merged cells, nested, mixed types, multi-page)",
+    "score": "unusable",
+    "notes": "_parse_docx joins paragraph.text only — every one of the 5 tables is silently dropped. 0 of the actual cell values (numbers, ISO dates, SKUs, percentages) survive; only the prose paragraphs describing what each table contains come through. Confirms the existing `# ponytail:` comment in ingestion.py: 'paragraphs only — text inside tables is skipped.'"
+  }
+]
