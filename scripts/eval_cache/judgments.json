@@ -1,0 +1,1272 @@
+{
+  "sf-01:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate answer matches all the key ideas in the reference answer: mathematical and physical truths, controlled experiments supporting hypotheses, improvement through practice, and Occam's razor."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided sources, intelligent beings elsewhere in the universe would likely share:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "* The truths of mathematics and physics (such as the mass of a carbon atom) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "* The principle that a controlled experiment testing a hypothesis entitles one to have a proportionally increased belief in it [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "* The idea that one can get better at something by practicing [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "* Occam's razor [1][2].",
+          "cited": [
+            1,
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.592767659281042
+    }
+  },
+  "sf-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly claims the sources do not mention Graham or the ideas, while the reference specifies several shared universal ideas such as mathematical and physical truths, controlled experiments, practice improving performance, and Occam's razor."
+    }
+  },
+  "sf-01:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 4,
+      "reasoning": "The candidate includes all core ideas from the reference\u2014mathematical truths, physical truths, controlled experiments, practice improving performance, and Occam\u2019s razor\u2014but adds speculative extras like justice that are not in the reference."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham suggests that intelligent beings anywhere in the universe would probably share:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "- **The truths of mathematics and physics** (e.g., the same math truths by definition, and physical facts like the mass of a carbon atom being the same). [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "- **The principle that controlled experiments increase belief** in a hypothesis in proportion to the evidence. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "- **The idea that practicing helps you get better at something.** [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "- **Occam\u2019s razor** (favoring simpler explanations). [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "- Possibly **justice** and other non-mathematical/phsyical concepts, with the \u201calien truth\u201d approach being generous about what might plausibly be relevant to aliens. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.9090909090909091,
+      "answer_relevancy": 0.8923155701927042
+    }
+  },
+  "sf-01:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 2,
+      "reasoning": "The candidate captures a vague notion of shared reasoning but misses nearly all the specific ideas Graham names, such as mathematical and physical truths, controlled experiments, practice improving performance, and Occam's razor."
+    }
+  },
+  "sf-02:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies Erd\u0151s's 'God's book' and accurately captures the key idea that such proofs feel discovered rather than invented and have universal appeal."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Paul Graham connects the concept of alien truth to Erd\u0151s's idea of \"God's book,\" which Erd\u0151s used to describe particularly good proofs [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "The implications of this idea are:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "1. A sufficiently good proof was more discovered than invented [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "2. The goodness of that proof would be universally recognized [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8571840572173233
+    }
+  },
+  "sf-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly claims the sources contain no relevant mention, while the reference answer identifies Erd\u0151s's idea of 'God's book' as the correct connection to alien truth."
+    }
+  },
+  "sf-02:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies Erd\u0151s\u2019s idea of 'God\u2019s book' and accurately captures the key notion that such proofs feel discovered rather than invented, matching the reference answer."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham connects \u201calien truth\u201d to Erd\u0151s\u2019s idea of \u201cGod\u2019s book,\u201d where a particularly good proof is something that seems to be more discovered than invented and whose goodness would be universally recognized [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8509241075771178
+    }
+  },
+  "sf-02:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the reference is Erd\u0151s's idea of 'God's book,' not the probabilistic method."
+    }
+  },
+  "sf-03:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches all three items in the reference answer: help people, take care of the world, and make good new things."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "According to \"What to Do,\" the three things one should do are:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "1. Help people [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "2. Take care of the world [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "3. Make good new things [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.6743805875862611
+    }
+  },
+  "sf-03:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer lists three different actions that do not match the reference answer\u2019s points: help people, take care of the world, and make good new things."
+    }
+  },
+  "sf-03:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate answer exactly matches the three things in the reference answer: help people, take care of the world, and make good new things."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "In \u201cWhat to Do,\u201d Paul Graham says we should: (1) help people, (2) take care of the world, and (3) make good new things. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.834821599073521
+    }
+  },
+  "sf-03:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide any of the three actions from the reference answer and instead declines to answer, so it is incorrect."
+    }
+  },
+  "sf-04:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate captures both key points from the reference\u2014broader scope beyond ideas to art/music/physics and emphasis on actual creation over mere criticism or unacted-upon ideas\u2014while adding compatible detail."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham preferred the phrasing \"make good new things\" over \"have good new ideas\" for a few reasons:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "* **Greater generality:** \"Have good new ideas\" did not seem general enough because it did not include making art or music, except insofar as they embody new ideas (and art/music embody more than just ideas) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "* **A bias toward creation:** The phrasing \"make good new things\" biases us toward creation [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "It causes people to prefer ideas that naturally result in making things, rather than making critical observations about things other people have made [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "* **The connection to understanding:** Even for conscious ideas, making things relates to understanding [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "To understand something deeply, one needs to be able to make a model of it or write about it; trying to express what you understand is a way to understand it better [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.8666666666666667,
+      "answer_relevancy": 0.9505153990317331
+    }
+  },
+  "sf-04:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly claims the sources do not mention the reason, while the reference explicitly says Graham chose the phrase because it is broader than ideas alone and emphasizes actually making things."
+    }
+  },
+  "sf-04:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 4,
+      "reasoning": "The candidate captures the key point that the phrase is broader and better covers areas like art and music, but it omits the other important reason from the reference: emphasizing actual creation rather than just having ideas or criticizing."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham says he initially used \u201cgood new ideas,\u201d but prefers the broader phrasing \u201cmake good new things\u201d because \u201cgood new ideas\u201d didn\u2019t seem general enough\u2014e.g., it doesn\u2019t clearly cover making art or music except in a way that stretches the word \u201cidea\u201d to include \u201ceverything that goes through your nervous system\u201d [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9006983764858705
+    }
+  },
+  "sf-04:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because it claims the sources lack the information, whereas the reference explicitly gives Graham\u2019s reason: the phrase is broader and emphasizes actually making things rather than merely having ideas."
+    }
+  },
+  "sf-05:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate matches the reference exactly, stating the roughly 20:1 conversion and the example that a 1% wealth tax equals a 20% income tax."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided source, the conversion rate given between a wealth tax and an equivalent income tax (assuming a 5% risk-free rate of return) is about 20 [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "A wealth tax of 1% is equivalent to an income tax of 20% [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.6306276365776444
+    }
+  },
+  "sf-05:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the reference explicitly states the conversion is about 20 to 1, with a 1% wealth tax equivalent to a 20% income tax."
+    }
+  },
+  "sf-05:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate answer exactly matches the reference by stating that a 1% wealth tax is equivalent to a 20% income tax at a 5% return on capital."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham says the conversion rate is about **20**: **a 1% wealth tax is equivalent to a 20% income tax**, assuming a **5%** rate of return on capital [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8894920960989631
+    }
+  },
+  "sf-05:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer contradicts the reference: at a 5% return, the correct conversion is about 20-to-1 (e.g., 1% wealth tax \u2248 20% income tax), not 1.3-to-1."
+    }
+  },
+  "sf-06:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches Graham\u2019s calculation of 61.75% (37% + 4.75% + 20%) and correctly states that this exceeds Denmark\u2019s 60.5% top rate."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "To find the combined marginal tax rate, Graham calculates the sum of the top US federal tax rate (37%), the median state income tax rate (Oklahoma's at 4.75%), and the 20% income tax equivalent of a 1% wealth tax (since a 1% wealth tax is equivalent to a 20% income tax) [1], [2].",
+          "cited": [
+            1,
+            2
+          ],
+          "supported": false
+        },
+        {
+          "sentence": "Comparing this to Denmark\u2014which currently has the highest marginal income tax rate in the world at 60.5%\u2014a median US state adding a 1% wealth tax would cause its residents to have an even higher rate, resulting in the highest taxes in the world [1], [2].",
+          "cited": [
+            1,
+            2
+          ],
+          "supported": false
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8380354460426139
+    }
+  },
+  "sf-06:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly claims the sources do not contain the information, while the reference explicitly gives the combined marginal tax rate as 61.75% and notes it exceeds Denmark's 60.5% rate."
+    }
+  },
+  "sf-06:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference calculation of 61.75% (37% + 4.75% + 20%) and correctly states that it is higher than Denmark\u2019s 60.5% rate."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Paul Graham computes that in the median case, a US state adding a 1% wealth tax corresponds to adding 20% to the income tax rate (his conversion rate: \u201c1% of wealth tax is equivalent to 20% of income tax\u201d) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "He then combines that with existing marginal rates: top US federal 37% plus median state income tax 4.75%, plus the converted 20%, for a total of 61.75% [3].",
+          "cited": [
+            3
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "He compares this to Denmark\u2019s highest marginal income tax rate of 60.5% [3].",
+          "cited": [
+            3
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "So Graham\u2019s median-case combined marginal rate (61.75%) is slightly higher than Denmark\u2019s 60.5% [3].",
+          "cited": [
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8505620425491156
+    }
+  },
+  "sf-06:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide the calculated combined marginal tax rate or the comparison to Denmark, so it fails to answer the question despite not contradicting the reference."
+    }
+  },
+  "sf-07:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies Sean Parker as the person the college student met by chance after moving to Palo Alto, matching the reference answer."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "In the Facebook-era example, Graham describes a college student who moved to Palo Alto for the summer by chance running into Sean Parker on a random suburban street [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.912333697930313
+    }
+  },
+  "sf-07:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly says the sources do not contain the answer, while the reference clearly identifies Sean Parker as the person Graham describes."
+    }
+  },
+  "sf-07:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies Sean Parker and matches the essay\u2019s Facebook-era chance-meeting example in Palo Alto."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham describes a college student who, after deciding to move to the Valley for the summer, \u201chappen[s] to run into Sean Parker\u201d on a random suburban street in Palo Alto [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.2,
+      "answer_relevancy": 0.7486737891550083
+    }
+  },
+  "sf-07:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer does not identify Sean Parker and instead claims the information is unavailable, so it fails to answer the question."
+    }
+  },
+  "sf-08:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies Wufoo and notes Tampa, which matches the reference answer exactly."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided sources, the company cited is Wufoo, though they were based in Tampa rather than Florida generally [1 (Notes [1])].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.6666666666666666,
+      "answer_relevancy": 0.24858731301209355
+    }
+  },
+  "sf-08:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the referenced Florida-based startup Graham cites is Wufoo in Tampa, not Mailchimp."
+    }
+  },
+  "sf-08:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference by naming Wufoo and specifying Tampa, Florida, as the successful startup outside a major hub."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham cites **Wufoo**, which he says was based in **Tampa** (Florida) and succeeded outside a startup hub. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.6666666666666666,
+      "answer_relevancy": 0.9019189553051276
+    }
+  },
+  "sf-08:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide the referenced company and instead says it cannot answer, while the correct answer is Wufoo, based in Tampa."
+    }
+  },
+  "sf-09:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference: 28.4 BLEU on WMT 2014 English-to-German and an improvement of more than 2 BLEU over the previous best."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "The Transformer achieved 28.4 BLEU on the WMT 2014 English-to-German translation task, and it improved over the existing best results (including ensembles) by over 2 BLEU [1][3].",
+          "cited": [
+            1,
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9562319112089169
+    }
+  },
+  "sf-09:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer incorrectly claims the information is unavailable, while the reference explicitly states the Transformer achieved 28.4 BLEU and beat the previous best by more than 2 BLEU."
+    }
+  },
+  "sf-10:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate matches the reference on training time and hardware, adding the specific GPU type without contradicting anything."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "The big Transformer model that achieved the new state-of-the-art on WMT 2014 English-to-French was trained for 3.5 days on a machine with 8 NVIDIA P100 GPUs ([1][3]).",
+          "cited": [
+            1,
+            3
+          ],
+          "supported": false
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8407261076233791
+    }
+  },
+  "sf-10:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer says the information is unavailable, but the reference clearly states it took 3.5 days on eight GPUs, so it fails to provide the correct answer."
+    }
+  },
+  "mh-01:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference answer, correctly showing that both a 20% income tax on the $5 return and a 1% wealth tax on the $100 principal leave $104 after one year."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "You end up with **$104** in either case.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "- **20% income tax:** $100 earns 5% \u2192 $5 profit.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "Pay 20% of $5 = $1 tax, so after-tax profit is $4.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "End of year: $100 + $4 = **$104**. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "- **Equivalent 1% wealth tax (conversion rate 1% wealth \u2248 20% income):** $100 earns 5% \u2192 $5 profit.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "Pay 1% of $100 = $1 wealth tax, so remaining wealth is $99 plus the $5 profit \u2192 $104.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "End of year: **$104**. [1]",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8420995476583606
+    }
+  },
+  "mh-01:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not answer the calculation, whereas the correct result is $104 under both the 20% income tax and the equivalent 1% wealth tax."
+    }
+  },
+  "mh-02:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies both components\u2014startup culture feeling normal/cool and chance meetings with helpful people\u2014and accurately states the shared underlying factor as the concentration/number of startup-minded people nearby."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham says Silicon Valley\u2019s \u201cantidote\u201d to startup failure has **two components**: **(1) being in a place where startups are the cool thing to do**, and **(2) chance meetings with people who can help you** [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "He further says that **both components are driven by the same underlying factor**: **the number of startup people around you** [3].",
+          "cited": [
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9647436032438534
+    }
+  },
+  "mh-02:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide the two components or the underlying factor from the reference answer and instead declines due to lack of source access."
+    }
+  },
+  "mh-03:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 3,
+      "reasoning": "It correctly states the parallelizability and reduced training-time claim, but the cited supporting result is the wrong one: the reference specifically points to the English-French 41.8 BLEU result after 3.5 days on 8 GPUs and its comparison to prior training costs."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "The paper claims that the Transformer is **more parallelizable** and can be trained with **significantly less time to train** than architectures based on recurrent or convolutional layers, because it **eschews recurrence entirely** and relies **only on attention** [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "As specific backing for this training-time claim, it reports that on the WMT 2014 English-to-German translation task, the **Transformer (big) was trained in 3.5 days on 8 P100 GPUs** [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7909607739788511
+    }
+  },
+  "mh-03:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer does not provide the paper\u2019s claim or the supporting training-time result from the reference, instead incorrectly stating the information is unavailable."
+    }
+  },
+  "adv-01:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states that the essay does not address remote work or its effect on where startups form, matching the reference answer."
+    },
+    "citation_accuracy": null,
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8820729480643659
+    }
+  },
+  "adv-01:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states that the provided material does not include the needed source text and therefore does not answer the question, which matches the reference behavior."
+    }
+  },
+  "adv-02:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate matches the reference by correctly stating that no such pretraining corpus is mentioned and implying there was no separate unlabeled pretraining phase in the provided sources."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "The provided sources do not mention any large unlabeled text corpus that the Transformer was pre-trained on before fine-tuning for translation. [1][2][3]",
+          "cited": [
+            1,
+            2,
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.0
+    }
+  },
+  "adv-02:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate directly contradicts the reference by claiming a separate pretraining phase on an unlabeled corpus, whereas the paper did not use unsupervised pretraining and was trained only on WMT translation pairs."
+    }
+  },
+  "mt-01:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 2,
+      "reasoning": "It correctly identifies the three things he lists, but it does not answer which one deserves the most emphasis or explain why, which are the key points in the reference answer."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham says there are three things you should do: **(1) help people, (2) take care of the world, and (3) make good new things** [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.75,
+      "answer_relevancy": 0.4277218149248854
+    }
+  },
+  "mt-01:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide the referenced choice or reason, instead stating it cannot answer, whereas the reference says 'Make good new things' deserves the most emphasis because it is the highest expression of human thinking and humanity's most impressive capability."
+    }
+  },
+  "mt-02:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 4,
+      "reasoning": "The candidate gives the computed U.S. rate as 61.75%, which implies it exceeds Denmark\u2019s 60.5% rate as in the reference, but it does not explicitly state the comparison to Denmark."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Graham computes a combined marginal tax rate of 61.75% for the median US state after adding a 1% wealth tax (converted to an additional 20% income tax), i.e., 37% (federal) + 4.75% (state) + 20% (wealth-tax equivalent) = 61.75% [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.8571428571428571,
+      "answer_relevancy": 0.2958487341521041
+    }
+  },
+  "mt-02:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the reference explicitly states Denmark's rate is 60.5% and that the compared rate exceeds it."
+    }
+  },
+  "fig-01:gpt-5.4-nano:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference by identifying a Linear layer followed by a Softmax layer at the top of the decoder before output probabilities."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Right before the model outputs its probability distribution, the diagram shows **(1) a Linear block** followed by **(2) a Softmax block** at the very top of the decoder [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.8250299348466912
+    }
+  },
+  "fig-01:gpt-5.4-nano:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate does not provide the required blocks and instead refuses to answer, while the reference specifies they are a Linear layer followed by a Softmax layer."
+    }
+  },
+  "sf-09:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference: it states the Transformer scored 28.4 BLEU on WMT 2014 English-to-German and that this was more than 2 BLEU better than the previous best, including ensembles."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "On the WMT 2014 English-to-German translation task, the big Transformer model achieved a BLEU score of 28.4 [1][3].",
+          "cited": [
+            1,
+            3
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "This score outperformed the best previously reported models (including ensembles) by more than 2.0 BLEU [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8280344759277486
+    }
+  },
+  "sf-09:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate answer exactly matches the reference: it states the Transformer scored 28.4 BLEU and surpassed the previous best, including ensembles, by over 2 BLEU points."
+    }
+  },
+  "sf-10:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states the training time and hardware\u20143.5 days on 8 GPUs\u2014and adds a compatible detail (NVIDIA P100s); the omitted BLEU score is not required by the question asked."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided sources, the big Transformer model was trained for 3.5 days on one machine with 8 NVIDIA P100 GPUs.",
+          "cited": [
+            1,
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.75,
+      "answer_relevancy": 0.7843210095956119
+    }
+  },
+  "sf-10:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate answer exactly matches the reference on both the training time (3.5 days) and hardware (eight GPUs), with no contradictions or omissions relevant to the question."
+    }
+  },
+  "mh-01:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate exactly matches the reference conclusion of $104 under both tax schemes and correctly explains the arithmetic for each case."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Under either a 20% income tax or an equivalent 1% wealth tax, you end up with **$104** at the end of the year [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "With a 20% income tax: Your $100 earns a 5% rate of return ($5), bringing your total to $105 before taxes [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "You must pay 20% of that $5 return in income tax (which is $1), leaving you with $4 in after-tax income [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "At the end of the year, you have your initial $100 plus your $4 after-tax income, totaling **$104** [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "With a 1% wealth tax: Your $100 earns a 5% rate of return ($5) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "However, you must pay 1% of your total $100 in wealth tax (which is $1) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "At the end of the year, you have your remaining $99 of capital plus the $5 return, totaling **$104** [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7488660520816887
+    }
+  },
+  "mh-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate matches the reference exactly, correctly showing that both a 20% income tax on $5 of earnings and a 1% wealth tax on $100 leave $104 after one year."
+    }
+  },
+  "mh-02:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly identifies both components\u2014startup-normalizing culture and helpful chance encounters\u2014and the shared underlying factor as the density of startup-minded people in one place."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided sources, the two components of the antidote are:",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "1. Being in a place where startups are considered the cool/fashionable thing to do [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "2. Chance meetings with people who can help you [1][2].",
+          "cited": [
+            1,
+            2
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "Graham states that both components are driven by a single underlying factor: the number (or density) of startup people around you [2][3].",
+          "cited": [
+            2,
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.5370434368944667
+    }
+  },
+  "mh-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect: it names cheap programming languages and hardware, whereas the reference says the antidote is a normalizing startup culture and chance meetings with helpful people, both driven by the density of startup-minded people in one place."
+    }
+  },
+  "mh-03:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate accurately states the claimed advantages in parallelizability and reduced training time, and includes the key supporting result of 41.8 BLEU on English-French after 3.5 days on 8 GPUs, with only an extra correct detail about English-German."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "The paper claims that the Transformer is more parallelizable and requires significantly less time to train compared to models based on recurrent or convolutional layers [2, 7].",
+          "cited": [
+            2,
+            7
+          ],
+          "supported": false
+        },
+        {
+          "sentence": "On the WMT 2014 English-to-German translation task, the big Transformer model established a new state-of-the-art BLEU score of 28.4 after training for 3.5 days on 8 P100 GPUs [2, 4].",
+          "cited": [
+            2,
+            4
+          ],
+          "supported": false
+        },
+        {
+          "sentence": "On the WMT 2014 English-to-French translation task, the model achieved a single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, which represents \"a small fraction of the training costs of the best models from the literature\" [2].",
+          "cited": [
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.909493475126329
+    }
+  },
+  "mh-03:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 3,
+      "reasoning": "It correctly states the parallelization/training-time claim and mentions 3.5 days on 8 GPUs, but it cites the wrong benchmark and omits the key result that this was the big model achieving 41.8 BLEU on English-French as evidence of reduced training cost."
+    }
+  },
+  "adv-01:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states that the provided sources do not address remote work's effect on where startups form, matching the reference answer."
+    },
+    "citation_accuracy": null,
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    }
+  },
+  "adv-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate invents a claim about remote work and startup hubs, whereas the reference says this topic is not addressed in the essay and the correct response is to say it is not in the provided documents."
+    }
+  },
+  "adv-02:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states that the paper does not describe any large unlabeled pretraining corpus and that the Transformer was trained on supervised translation tasks instead."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on the provided sources, there is no mention of the Transformer being pre-trained on a large unlabeled text corpus before being fine-tuned for translation.",
+          "cited": [],
+          "supported": true
+        },
+        {
+          "sentence": "The sources only mention training the Transformer on machine translation tasks (such as WMT 2014 English-to-German and English-to-French) [1][5] and English constituency parsing (using the Wall Street Journal portion of the Penn Treebank, as well as semi-supervised settings involving larger corpora) [2][3].",
+          "cited": [
+            1,
+            5,
+            2,
+            3
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8271253027918314
+    }
+  },
+  "adv-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate correctly states that the provided document does not mention any prior pretraining on a large unlabeled corpus, matching the reference that no such pretraining occurred in the original Transformer paper."
+    }
+  },
+  "mt-01:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer directly contradicts the reference, which clearly says he gives the most emphasis to 'Make good new things' and explains why."
+    },
+    "citation_accuracy": null,
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    }
+  },
+  "mt-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the reference explicitly says he emphasizes 'Make good new things' most, with a clear reason, whereas the candidate claims no such mention exists."
+    }
+  },
+  "mt-02:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 5,
+      "reasoning": "The candidate directly matches the reference by stating that it exceeds Denmark's 60.5% rate, and adds consistent supporting detail without contradicting the reference."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "Based on Graham's calculations, a median US state adding a 1% wealth tax (which is equivalent to a 20% income tax) results in a total marginal tax rate of 61.75% (the 37% top US federal tax rate, plus the median state income tax rate of 4.75%, plus the 20% equivalent) [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "This rate of 61.75% is higher than Denmark's marginal income tax rate of 60.5%, which Graham notes as currently being the highest in the world [1].",
+          "cited": [
+            1
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.47332021736440866
+    }
+  },
+  "mt-02:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate answer is incorrect because the reference explicitly states that it exceeds Denmark's rate of 60.5%, while the candidate claims Denmark is not mentioned."
+    }
+  },
+  "fig-01:gemini/gemini-3.5-flash-lite:rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate identifies internal decoder sublayers instead of the final two top blocks, which are the Linear layer followed by the Softmax layer."
+    },
+    "citation_accuracy": {
+      "sentences": [
+        {
+          "sentence": "1. **Add & Norm** (located right below the output) [2]",
+          "cited": [
+            2
+          ],
+          "supported": true
+        },
+        {
+          "sentence": "2. **Feed Forward** (located just below that Add & Norm block) [2]",
+          "cited": [
+            2
+          ],
+          "supported": true
+        }
+      ]
+    },
+    "ragas": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.8713924655965908
+    }
+  },
+  "fig-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "correctness": {
+      "score": 1,
+      "reasoning": "The candidate is incorrect because it names LayerNorm and Linear, while the reference clearly states the top two blocks are Linear followed by Softmax."
+    }
+  }
+}

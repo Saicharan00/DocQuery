@@ -1,0 +1,112 @@
+[
+  {
+    "key": "sf-07:gemini/gemini-3.5-flash-lite:rag",
+    "question": "Who does Graham describe a college student meeting by chance after moving to Palo Alto, in the essay's Facebook-era example?",
+    "ground_truth_answer": "Sean Parker \u2014 the essay's example of a chance meeting (around the 2004 Facebook era) that connected a student with someone who understood the domain and had investor connections.",
+    "model": "gemini/gemini-3.5-flash-lite",
+    "condition": "rag",
+    "answer": "In the Facebook-era example, Graham describes a college student who moved to Palo Alto for the summer by chance running into Sean Parker on a random suburban street [2].",
+    "human_score": 5,
+    "judge_score": 5,
+    "judge_reasoning": "The candidate correctly identifies Sean Parker as the person the college student met by chance after moving to Palo Alto, matching the reference answer."
+  },
+  {
+    "key": "sf-07:gpt-5.4-nano:rag",
+    "question": "Who does Graham describe a college student meeting by chance after moving to Palo Alto, in the essay's Facebook-era example?",
+    "ground_truth_answer": "Sean Parker \u2014 the essay's example of a chance meeting (around the 2004 Facebook era) that connected a student with someone who understood the domain and had investor connections.",
+    "model": "gpt-5.4-nano",
+    "condition": "rag",
+    "answer": "Graham describes a college student who, after deciding to move to the Valley for the summer, \u201chappen[s] to run into **Sean Parker**\u201d on a random suburban street in Palo Alto [2].",
+    "human_score": 5,
+    "judge_score": 5,
+    "judge_reasoning": "The candidate correctly identifies Sean Parker and matches the essay\u2019s Facebook-era chance-meeting example in Palo Alto."
+  },
+  {
+    "key": "sf-10:gpt-5.4-nano:rag",
+    "question": "How long did it take to train the big Transformer model that hit a new state-of-the-art on English-to-French, and on what hardware?",
+    "ground_truth_answer": "3.5 days on eight GPUs, reaching a BLEU score of 41.8.",
+    "model": "gpt-5.4-nano",
+    "condition": "rag",
+    "answer": "The **big Transformer model** that achieved the new state-of-the-art on **WMT 2014 English-to-French** was trained for **3.5 days** on a machine with **8 NVIDIA P100 GPUs** ([1][3]).",
+    "human_score": 5,
+    "judge_score": 5,
+    "judge_reasoning": "The candidate matches the reference on training time and hardware, adding the specific GPU type without contradicting anything."
+  },
+  {
+    "key": "sf-09:gemini/gemini-3.5-flash-lite:rag",
+    "question": "What BLEU score did the Transformer get on the WMT 2014 English-to-German translation task, and by how much did it beat the previous best?",
+    "ground_truth_answer": "28.4 BLEU, improving over the existing best results (including ensembles) by more than 2 BLEU.",
+    "model": "gemini/gemini-3.5-flash-lite",
+    "condition": "rag",
+    "answer": "On the WMT 2014 English-to-German translation task, the big Transformer model achieved a BLEU score of 28.4 [1][3]. This score outperformed the best previously reported models (including ensembles) by more than 2.0 BLEU [1].",
+    "human_score": 5,
+    "judge_score": 5,
+    "judge_reasoning": "The candidate exactly matches the reference: it states the Transformer scored 28.4 BLEU on WMT 2014 English-to-German and that this was more than 2 BLEU better than the previous best, including ensembles."
+  },
+  {
+    "key": "mt-01:gemini/gemini-3.5-flash-lite:no_rag",
+    "question": "Which of those does he say deserves the most emphasis, and why?",
+    "ground_truth_answer": "'Make good new things' \u2014 he argues it's the highest expression of human thinking and humanity's most impressive capability, and singles it out for more emphasis than the other two.",
+    "model": "gemini/gemini-3.5-flash-lite",
+    "condition": "no_rag",
+    "answer": "Based on the provided sources, there is no mention of which of those things deserves the most emphasis or why.",
+    "human_score": 1,
+    "judge_score": 1,
+    "judge_reasoning": "The candidate answer is incorrect because the reference explicitly says he emphasizes 'Make good new things' most, with a clear reason, whereas the candidate claims no such mention exists."
+  },
+  {
+    "key": "mh-03:gpt-5.4-nano:rag",
+    "question": "What does the paper claim about the Transformer's parallelizability and training cost compared to recurrent/convolutional models, and what specific training-time result backs that claim up?",
+    "ground_truth_answer": "The paper claims the Transformer is more parallelizable and needs significantly less time to train. That's backed up by the big model reaching a new state-of-the-art 41.8 BLEU on English-French after training only 3.5 days on 8 GPUs \u2014 'a small fraction of the training costs of the best models from the literature.'",
+    "model": "gpt-5.4-nano",
+    "condition": "rag",
+    "answer": "The paper claims that the Transformer is **more parallelizable** and can be trained with **significantly less time to train** than architectures based on recurrent or convolutional layers, because it **eschews recurrence entirely** and relies **only on attention** [1].  \n\nAs specific backing for this training-time claim, it reports that on the WMT 2014 English-to-German translation task, the **Transformer (big) was trained in 3.5 days on 8 P100 GPUs** [1].",
+    "human_score": 4,
+    "judge_score": 3,
+    "judge_reasoning": "It correctly states the parallelizability and reduced training-time claim, but the cited supporting result is the wrong one: the reference specifically points to the English-French 41.8 BLEU result after 3.5 days on 8 GPUs and its comparison to prior training costs."
+  },
+  {
+    "key": "sf-10:gemini/gemini-3.5-flash-lite:no_rag",
+    "question": "How long did it take to train the big Transformer model that hit a new state-of-the-art on English-to-French, and on what hardware?",
+    "ground_truth_answer": "3.5 days on eight GPUs, reaching a BLEU score of 41.8.",
+    "model": "gemini/gemini-3.5-flash-lite",
+    "condition": "no_rag",
+    "answer": "To answer this question, we must look at the details for the \"big\" Transformer model (Transformer (big)) that established a new state-of-the-art on the WMT 2014 English-to-French translation task [1]. \n\n* **Training Time:** It took 3.5 days [1].\n* **Hardware:** It was trained on 8 GPUs [1].",
+    "human_score": 5,
+    "judge_score": 5,
+    "judge_reasoning": "The candidate answer exactly matches the reference on both the training time (3.5 days) and hardware (eight GPUs), with no contradictions or omissions relevant to the question."
+  },
+  {
+    "key": "sf-08:gemini/gemini-3.5-flash-lite:no_rag",
+    "question": "What Florida-based company does Graham cite as a startup that succeeded outside a major startup hub?",
+    "ground_truth_answer": "Wufoo, based in Tampa.",
+    "model": "gemini/gemini-3.5-flash-lite",
+    "condition": "no_rag",
+    "answer": "Based on the provided sources, the Florida-based company that Graham cites as a startup that succeeded outside a major startup hub is Mailchimp [1].",
+    "human_score": 1,
+    "judge_score": 1,
+    "judge_reasoning": "The candidate answer is incorrect because the referenced Florida-based startup Graham cites is Wufoo in Tampa, not Mailchimp."
+  },
+  {
+    "key": "sf-09:gpt-5.4-nano:no_rag",
+    "question": "What BLEU score did the Transformer get on the WMT 2014 English-to-German translation task, and by how much did it beat the previous best?",
+    "ground_truth_answer": "28.4 BLEU, improving over the existing best results (including ensembles) by more than 2 BLEU.",
+    "model": "gpt-5.4-nano",
+    "condition": "no_rag",
+    "answer": "I don\u2019t have the needed information in the provided sources to answer this question (the sources don\u2019t include the Transformer\u2019s BLEU score on WMT 2014 English\u2192German or the previous best score for comparison).",
+    "human_score": 1,
+    "judge_score": 1,
+    "judge_reasoning": "The candidate answer incorrectly claims the information is unavailable, while the reference explicitly states the Transformer achieved 28.4 BLEU and beat the previous best by more than 2 BLEU."
+  },
+  {
+    "key": "adv-02:gpt-5.4-nano:no_rag",
+    "question": "According to 'Attention Is All You Need', what large unlabeled text corpus was the Transformer pre-trained on before being fine-tuned for translation?",
+    "ground_truth_answer": "Not in the paper. The original Transformer was trained directly and only on the WMT translation pairs \u2014 no separate unsupervised pretraining phase (that came later with BERT/GPT). Correct behavior: 'I don't see this in the provided documents.'",
+    "model": "gpt-5.4-nano",
+    "condition": "no_rag",
+    "answer": "In *\u201cAttention Is All You Need\u201d*, the Transformer is described as being pre-trained on a **large unlabeled English corpus**, specifically **\u201cWMT\u201914 English\u2013French data\u201d** before fine-tuning for translation [1].",
+    "human_score": 1,
+    "judge_score": 1,
+    "judge_reasoning": "The candidate directly contradicts the reference by claiming a separate pretraining phase on an unlabeled corpus, whereas the paper did not use unsupervised pretraining and was trained only on WMT translation pairs."
+  }
+]
