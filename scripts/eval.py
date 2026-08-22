@@ -286,6 +286,60 @@ def _retrieve_one(supabase: Client, question: dict) -> dict:
     }
 
 
+def cmd_cross_user(token_a: str, token_b: str) -> int:
+    """The automated isolation test BUILD.md's Day 11 section calls for: two
+    different Clerk accounts, one query vector, and an assertion that user B's
+    `retrieve()` never comes back with a chunk that belongs to user A.
+
+    `retrieve()` takes no user id (see `rag.py`'s docstring) — `match_chunks`
+    is security-invoker, so the `chunks_isolation` policy is what's supposed to
+    scope every search to whoever holds the token. This is the test that turns
+    that into a checked fact instead of an argument.
+    """
+    for label, token in (("A", token_a), ("B", token_b)):
+        remaining = _seconds_remaining(token)
+        if remaining < MIN_SECONDS_REMAINING:
+            print(f"Only {remaining:.0f}s left on token {label} (need {MIN_SECONDS_REMAINING}s). Paste a fresh one.")
+            return 1
+
+    # Any real question works — it only has to be a vector that user A's own
+    # corpus actually answers, which is exactly what sf-01 is for.
+    question = next(q for q in json.loads(EVAL_QA_PATH.read_text(encoding="utf-8")) if q["id"] == "sf-01")
+    query_vector = rag.embed_query(question["question"])
+
+    supabase_a = _build_supabase_client(token_a)
+    supabase_b = _build_supabase_client(token_b)
+
+    chunks_a = rag.retrieve(supabase_a, query_vector, k=MATCH_COUNT)
+    chunks_b = rag.retrieve(supabase_b, query_vector, k=MATCH_COUNT)
+
+    if not chunks_a:
+        print("FAIL: user A's own retrieve() returned nothing on this query — the test proves nothing until A's account has this document. Check the token.")
+        return 1
+
+    leaked = {c["id"] for c in chunks_a} & {c["id"] for c in chunks_b}
+    if leaked:
+        print(
+            f"FAIL: user B's retrieve() returned {len(leaked)} of user A's chunk(s) "
+            f"(out of {len(chunks_b)} total). RLS is not isolating retrieval."
+        )
+        return 1
+
+    print(
+        f"PASS: user A's retrieve() returned {len(chunks_a)} chunk(s) on this query; "
+        f"user B's retrieve() on the identical vector returned {len(chunks_b)}, none of them A's."
+    )
+    return 0
+
+    # In plain English: log in as two different people, ask the same question
+    # (as one vector, so both users are literally searching for the same
+    # thing), and check what comes back for each. User A should get real
+    # results — otherwise the test isn't testing anything. User B's results,
+    # whatever they are, must share zero chunk ids with user A's. If even one
+    # id overlaps, one user's private document leaked into another user's
+    # search, which is the exact failure RLS exists to prevent.
+
+
 def cmd_retrieve(token: str) -> int:
     remaining = _seconds_remaining(token)
     if remaining < MIN_SECONDS_REMAINING:
@@ -1414,10 +1468,18 @@ def main() -> int:
 
     subparsers.add_parser("report", help="Phase 3: assemble eval_results.md from everything on disk.")
 
+    cross_user_parser = subparsers.add_parser(
+        "cross-user", help="Automated RLS isolation check: two Clerk accounts, one query, zero overlap expected."
+    )
+    cross_user_parser.add_argument("--token-a", required=True, help="A fresh Clerk session JWT for the eval test account.")
+    cross_user_parser.add_argument("--token-b", required=True, help="A fresh Clerk session JWT for a second, different account.")
+
     args = parser.parse_args()
 
     if args.command == "retrieve":
         return cmd_retrieve(args.token)
+    if args.command == "cross-user":
+        return cmd_cross_user(args.token_a, args.token_b)
     if args.command == "resolve-hints":
         return cmd_resolve_hints()
     if args.command == "generate":

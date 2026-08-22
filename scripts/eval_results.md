@@ -184,6 +184,36 @@ Within one point: 10/10 (100%).
 
 **Total generation spend: $0.0353** (72 calls — judge-phase spend is separate).
 
-## 8. Failure mode analysis
+## 8. Cross-user isolation (automated RLS check)
 
-*(Fill in by hand: which questions failed, why, and what would fix it. BUILD.md calls this the section interviewers actually read.)*
+Two real, separately-signed-in Clerk accounts. One query vector (sf-01's question, embedded once) sent through `retrieve()` as each user. `match_chunks` is security-invoker, so `chunks_isolation` from migration 001 is the only thing standing between one user's documents and another's search results — this test turns that from an argument into a checked fact.
+
+**PASS.** User A's `retrieve()` returned 10 chunks (the eval test corpus). User B's `retrieve()` on the identical vector also returned 10 chunks — B has their own documents uploaded — and **zero of them were user A's chunk ids.** Two different, non-empty result sets on the same query, with no overlap, is stronger evidence than an empty-B result would have been: it rules out "B just has nothing to retrieve" as a trivial explanation and shows RLS actively partitioning two populated corpora.
+
+Script: `scripts/eval.py cross-user --token-a <A> --token-b <B>`.
+
+## 9. Failure mode analysis
+
+### Retrieval failure
+
+| Question | What happened | Root cause | Fix |
+|---|---|---|---|
+| **sf-10** | Ground-truth chunk (`f2c8a69d`) ranked #7 by HNSW — missed at production k=5, only recovered at k=10. | The phrasing "how long... and on what hardware" embeds closer to a neighboring results/table chunk (`afba622a`) than to the canonical prose chunk. That neighbor happened to rank #1 and *also* contained the training-time figure, so generation still answered correctly (correctness 5) despite the "official" ground-truth chunk being missed — an artifact of 800-token/100-overlap chunking spreading one fact across adjacent chunks, and of Phase 0 having to pick a single canonical chunk id per question when two would legitimately qualify. This is the only genuine retrieval miss in the whole run (16/16 hit rate everywhere else at k=5). |  Re-ranking (Day 11.5) is the direct fix — it re-scores the full k=20 vector candidate set against the literal query, which should pull `f2c8a69d` back above the neighboring table chunk regardless of embedding drift from phrasing. |
+
+### Generation failures
+
+| Question | What happened | Root cause | Fix |
+|---|---|---|---|
+| **mt-01** (multi-turn) | Query rewriting worked perfectly (`"...which of the three things Graham says we should do deserves the most emphasis, and why?"`) and retrieval hit the correct chunk at rank 1. Generation still failed on both models: Gemini answered *"The provided sources do not state that any one of those principles deserves the most emphasis"* (a false refusal — correctness 1); GPT just re-stated the earlier turn's answer (the three things), ignoring the actual follow-up (correctness 2). | Not a retrieval or rewriting problem — the retrieved chunk explicitly argues *why* "make good new things" is special ("the most impressive thing humans can do... the best kind of thinking"), but never uses the literal words "deserves the most emphasis." Gemini read that literally and refused; GPT appears to have anchored on the context-turn's question instead of the new one. This is a synthesis/reading-comprehension gap in the generation step, not upstream. |  Nothing upstream to fix. Worth flagging as a genuine model-quality gap for the writeup — a stronger judge model or explicit "answer may require inference from the passage, not just verbatim lookup" system-prompt wording might help, but this wasn't tested. |
+| **fig-01** (figure-only), Gemini only | Gemini named the wrong two blocks ("Add & Norm", "Feed Forward" — correctness 1, faithfulness 0.00). GPT correctly named "Linear" then "Softmax" (correctness 5). | Confirms the existing image-retrieval-ceiling finding from Day 10c: figure chunks embed from pixels only, with no caption text, so retrieval finds the right image (rank 2, in top-5) but the generating model still has to *read* the diagram correctly, and one of the two vision models misread the block order. | Already tracked as a known ceiling, not new scope for Day 11.5. |
+
+### Metric artifacts — not real failures
+
+Two of check 9's low scores and one faithfulness score turned out to be judge/metric limitations, not app bugs, once the raw judge output was read:
+
+- **Citation accuracy under-scores multi-source sentences.** Every "unsupported" verdict in the per-question table (`sf-06` 0/2, `sf-10`/gpt 0/1, `mh-03`/gemini 1/3) is a sentence that legitimately synthesizes facts from **two** cited chunks jointly (e.g. sf-06's "37% federal + 4.75% state + 20% wealth-tax-equivalent = 61.75%" cites `[1],[2]` — federal+state come from one chunk, the wealth-tax conversion from the other). The citation judge's rubric checks whether the sentence is supported, source by source, and never credits a sentence whose support is split across its citations. `mh-03`'s third sentence, which used a single citation `[2]`, was correctly marked `supported: true` — same judge, same run, only the citation count differs. This is a check-9 methodology gap, not evidence of hallucinated sourcing.
+- **sf-07 faithfulness = 0.00 despite a verbatim-grounded answer.** Gemini's answer ("...a college student who moved to Palo Alto for the summer by chance running into Sean Parker on a random suburban street") is close to word-for-word out of the retrieved chunk, and the same answer's citation was separately checked and marked `supported: true`. RAGAS's `Faithfulness` metric decomposes the answer into atomic claims and scores each by NLI against context; scoring this one at 0.00 while correctness (5) and citation accuracy (supported) both say it's grounded is inconsistent with the other two checks, and reads as RAGAS claim-decomposition noise rather than a real ungrounded answer. Worth noting for anyone trusting a single faithfulness number in isolation — it's exactly why checks 7, 8, and 9 are three separate rows instead of one blended "quality" score.
+
+### Takeaway
+
+Retrieval is not the bottleneck — 16/16 hit rate at k=5 (94% headline number is pulled down only by sf-10, which still generated correctly). The two real failures (`mt-01`, `fig-01`/Gemini) are both generation-side: one model literally reads a passage's diagram wrong, the other fails to synthesize an implicit answer from an explicit passage. The multi-turn question this eval was built to stress-test (`BUILD.md`'s Day 9 rewriting concern) turned out to have its rewriting and retrieval work fine — the residual failure moved one layer downstream, into generation itself.
