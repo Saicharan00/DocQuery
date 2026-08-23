@@ -739,9 +739,9 @@ the security boundary — this is the difference between claiming it and proving
 
 ### Done when
 
-- [ ] Each item has a before/after row in `eval_results.md`.
-- [ ] Re-ranking's delta is stated with its latency and cost, not just its accuracy.
-- [ ] The injection test's outcome is written down honestly, including what still gets through.
+- [x] Each item has a before/after row in `eval_results.md`. *(§10 — hybrid search was built and shipped even though Day 11's own failure-mode analysis found nothing on this corpus for it to fix; abstention landed at a conservative floor, not the precise cutoff originally assumed, once Day 11's actual similarity numbers were checked.)*
+- [x] Re-ranking's delta is stated with its latency and cost, not just its accuracy. *(§10.1 — 94%→100% hit rate at k=5, `sf-10` fixed; ~94ms/call steady-state latency, $0.002/question.)*
+- [x] The injection test's outcome is written down honestly, including what still gets through. *(§10.3 — both supported models resisted a realistic injection attempt even before any defense was written; the defense was still built as defense-in-depth, and the residual-risk limits are stated plainly, not glossed over.)*
 
 ---
 
