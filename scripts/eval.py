@@ -108,10 +108,15 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     text = f"{type(exc).__name__} {exc}"
     return any(marker in text for marker in RATE_LIMIT_MARKERS)
 
-# `match_chunks` and `match_chunks_exact` both called at 10, once each, per
-# question. k=3/5 ablation views are just `[:3]`/`[:5]` slices of this same
-# list later — no extra Supabase round trips for them.
-MATCH_COUNT = 10
+# `match_chunks_hybrid` and `match_chunks_exact` both called at 20, once each,
+# per question. k=3/5/10 ablation views are just `[:3]`/`[:5]`/`[:10]` slices
+# of this same list later — no extra Supabase round trips for them. Matches
+# `rag.RERANK_CANDIDATES`: Day 11.5's reranker needs the same candidate depth
+# production fetches, or its before/after numbers measure a different pipeline
+# than the one `/chat` actually runs. Widening 10 -> 20 doesn't disturb the
+# k=3/5/10 rows below it — RRF's rank for position i never depends on how many
+# lower-ranked candidates were fetched past it.
+MATCH_COUNT = 20
 
 # Below this, don't even start: a burst that begins with too little runway is
 # worse than not starting, since a partial run still burns the token. Day 10a
@@ -173,7 +178,7 @@ def _write_json_atomic(path: Path, data) -> None:
 
 def _is_cached(entry: dict | None) -> bool:
     """Whether a question's retrieval already ran to completion."""
-    return bool(entry) and "hnsw10" in entry and "exact10" in entry
+    return bool(entry) and "hnsw10" in entry and "exact10" in entry and "reranked5" in entry
 
 
 def _seconds_remaining(token: str) -> float:
@@ -262,26 +267,35 @@ def _history_for(question: dict) -> list[dict] | None:
 
 
 def _retrieve_one(supabase: Client, question: dict) -> dict:
-    """Run one question through embed + both retrieval functions + images.
+    """Run one question through embed + both retrieval functions + rerank + images.
 
     Multi-turn questions are rewritten first, exactly like `/chat` does — the
     embedding has to be of a standalone question, or "how does that compare"
     embeds to noise.
+
+    `hnsw10` is a stale name as of Day 11.5: `rag.retrieve` now calls
+    `match_chunks_hybrid` (migration 009), so this is the hybrid-fused top 20
+    (`MATCH_COUNT`), not a pure vector-only top 10. Left as-is rather than
+    renamed everywhere `cmd_report` reads this key — the meaning is documented
+    here, once. `reranked5` is the new field: production's actual final
+    output, `hnsw10` reranked and cut down to `rag.RETRIEVE_K`.
     """
     history = _history_for(question)
     query_text = rag.rewrite_query(question["question"], history) if history else question["question"]
 
     query_vector = rag.embed_query(query_text)
-    hnsw10 = rag.retrieve(supabase, query_vector, k=MATCH_COUNT)
+    hnsw10 = rag.retrieve(supabase, query_vector, query_text, k=MATCH_COUNT)
     exact10 = _retrieve_exact(supabase, query_vector, k=MATCH_COUNT)
-    # Matches production's RETRIEVE_K=5 — the images a real answer at the
-    # default k would actually see.
-    images = rag.load_images(supabase, hnsw10[:5])
+    reranked5 = rag.rerank(query_text, hnsw10, top_n=rag.RETRIEVE_K)
+    # `reranked5`, not `hnsw10[:5]` — the images a real answer would actually
+    # see are the ones behind whatever reranking decided was the final top 5.
+    images = rag.load_images(supabase, reranked5)
 
     return {
         "rewritten_query": query_text,
         "hnsw10": hnsw10,
         "exact10": exact10,
+        "reranked5": reranked5,
         "images": images,
     }
 
@@ -291,7 +305,7 @@ def cmd_cross_user(token_a: str, token_b: str) -> int:
     different Clerk accounts, one query vector, and an assertion that user B's
     `retrieve()` never comes back with a chunk that belongs to user A.
 
-    `retrieve()` takes no user id (see `rag.py`'s docstring) — `match_chunks`
+    `retrieve()` takes no user id (see `rag.py`'s docstring) — `match_chunks_hybrid`
     is security-invoker, so the `chunks_isolation` policy is what's supposed to
     scope every search to whoever holds the token. This is the test that turns
     that into a checked fact instead of an argument.
@@ -305,13 +319,14 @@ def cmd_cross_user(token_a: str, token_b: str) -> int:
     # Any real question works — it only has to be a vector that user A's own
     # corpus actually answers, which is exactly what sf-01 is for.
     question = next(q for q in json.loads(EVAL_QA_PATH.read_text(encoding="utf-8")) if q["id"] == "sf-01")
-    query_vector = rag.embed_query(question["question"])
+    query_text = question["question"]
+    query_vector = rag.embed_query(query_text)
 
     supabase_a = _build_supabase_client(token_a)
     supabase_b = _build_supabase_client(token_b)
 
-    chunks_a = rag.retrieve(supabase_a, query_vector, k=MATCH_COUNT)
-    chunks_b = rag.retrieve(supabase_b, query_vector, k=MATCH_COUNT)
+    chunks_a = rag.retrieve(supabase_a, query_vector, query_text, k=MATCH_COUNT)
+    chunks_b = rag.retrieve(supabase_b, query_vector, query_text, k=MATCH_COUNT)
 
     if not chunks_a:
         print("FAIL: user A's own retrieve() returned nothing on this query — the test proves nothing until A's account has this document. Check the token.")
@@ -399,16 +414,15 @@ def _messages_for(question: dict, condition: str, retrieval_entry: dict) -> tupl
     """The exact messages `stream_answer` would receive for one question under
     one condition, plus the chunk ids used (empty for `no_rag`).
 
-    `rag` always takes the top `RETRIEVE_K` of Phase 1's cached hnsw10 —
-    matching production's own default k, not the k=10 the retrieval cache
-    happens to hold. The original (unrewritten) question goes to the model,
-    with history to explain it — `rewrite_query`'s output is for the
-    *embedding* only and is never shown to an answering model, in eval or in
-    `/chat`.
+    `rag` always takes Phase 1's cached `reranked5` — production's own final
+    5, already reranked, not a blind slice of the wider retrieval cache. The
+    original (unrewritten) question goes to the model, with history to
+    explain it — `rewrite_query`'s output is for the *embedding* only and is
+    never shown to an answering model, in eval or in `/chat`.
     """
     history = _history_for(question)
     if condition == "rag":
-        chunks = retrieval_entry["hnsw10"][: rag.RETRIEVE_K]
+        chunks = retrieval_entry["reranked5"]
         images = retrieval_entry["images"]
     else:
         chunks, images = [], {}
@@ -591,12 +605,17 @@ def cmd_resolve_hints() -> int:
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     questions = json.loads(EVAL_QA_PATH.read_text(encoding="utf-8"))
 
-    todo = [q for q in questions if q["type"] != "adversarial" and not q.get("ground_truth_chunk_id")]
+    # `prompt-injection` is skipped for the same reason `adversarial` is:
+    # Day 11.5's injection test is graded by eyeball (does the model obey the
+    # hidden instruction?), not by whether retrieval hit a specific chunk —
+    # see `_section_prompt_injection`.
+    excluded_types = {"adversarial", "prompt-injection"}
+    todo = [q for q in questions if q["type"] not in excluded_types and not q.get("ground_truth_chunk_id")]
     if not todo:
-        print("Every non-adversarial question already has a ground_truth_chunk_id.")
+        print("Every question needing a ground truth chunk already has one.")
         return 0
 
-    print(f"{len(todo)} question(s) to resolve. The 2 adversarial questions are skipped by design.\n")
+    print(f"{len(todo)} question(s) to resolve. Adversarial and prompt-injection questions are skipped by design.\n")
 
     resolved_this_run = 0
     for position, question in enumerate(todo, start=1):
@@ -678,7 +697,7 @@ def cmd_resolve_hints() -> int:
     # partway through only costs the question you were on, not the ones
     # already done.
 
-    remaining = [q["id"] for q in questions if q["type"] != "adversarial" and not q.get("ground_truth_chunk_id")]
+    remaining = [q["id"] for q in questions if q["type"] not in excluded_types and not q.get("ground_truth_chunk_id")]
     print(f"Resolved {resolved_this_run} this run. {len(remaining)} still unresolved: {remaining or 'none'}.")
     return 0
 
@@ -1506,7 +1525,10 @@ if __name__ == "__main__" and len(sys.argv) == 1:
 
     assert not _is_cached(None), "a missing entry read as cached"
     assert not _is_cached({"hnsw10": []}), "a half-written entry (no exact10) read as cached"
-    assert _is_cached({"hnsw10": [], "exact10": []}), "a complete entry (even with 0 hits) read as not cached"
+    assert not _is_cached({"hnsw10": [], "exact10": []}), "a pre-Day-11.5 entry (no reranked5) read as cached"
+    assert _is_cached({"hnsw10": [], "exact10": [], "reranked5": []}), (
+        "a complete entry (even with 0 hits) read as not cached"
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "nested" / "out.json"

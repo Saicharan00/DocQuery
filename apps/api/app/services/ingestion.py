@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 EMBED_MODEL = "embed-v4.0"
 EMBED_DIMENSIONS = 1536
 
+# `-fast`, not `-pro`: this app is a self-funded, rate-limited demo (per-user
+# daily caps, no BYOK — see CLAUDE.md's non-goals), so cost per question is a
+# design constraint, not an afterthought. `-pro` scores a little higher; Day
+# 11.5's before/after retrieval numbers are what decide if that trade is worth
+# revisiting.
+RERANK_MODEL = "rerank-v4.0-fast"
+
 # Cohere rejects a batch larger than this. Kept as a constant so a rejected
 # request points at one line rather than a number buried in a loop.
 EMBED_BATCH_SIZE = 96
@@ -632,6 +639,40 @@ def embed(texts: list[str], input_type: str = "search_document") -> list[list[fl
         )
 
     return vectors
+
+
+def rerank_documents(query: str, documents: list[str], top_n: int) -> list[int]:
+    """Score `documents` against `query` and return their original indexes,
+    best match first, truncated to `top_n`.
+
+    A second, slower pass over a small candidate set — unlike `embed`, this
+    can't be precomputed at ingestion time, because it scores each document
+    against *this* question, not against documents in isolation. That's also
+    why it only ever runs over the handful of candidates `retrieve()` already
+    narrowed things down to, never the whole corpus.
+
+    Returns indexes rather than reordering `documents` itself: the caller
+    (`rag.rerank`) holds the full chunk dicts this function never sees, and
+    Cohere's response already comes back as `{index, relevance_score}` pairs —
+    passing indexes through is less code than rebuilding chunk dicts here.
+    """
+    if not documents:
+        return []
+
+    response = _cohere().rerank(
+        model=RERANK_MODEL,
+        query=query,
+        documents=documents,
+        top_n=min(top_n, len(documents)),
+    )
+    return [result.index for result in response.results]
+
+    # In plain English: hand Cohere the question and the list of candidate
+    # texts. It scores each one for how well it actually answers the question
+    # (not just how similar it *sounds*), and hands back which ones scored
+    # best, in order, as positions in the list we sent — not the texts
+    # themselves. `min(top_n, len(documents))` is there so asking for 5 out of
+    # a candidate list that only has 3 doesn't error.
 
 
 def embed_images(jpegs: list[bytes]) -> list[list[float]]:
