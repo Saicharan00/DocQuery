@@ -71,6 +71,21 @@ export class ConflictError extends Error {
 }
 
 /**
+ * Raised on a 429: the server, not this document, is at capacity.
+ *
+ * A separate class from `ConflictError` for the same reason that one exists —
+ * the ingest loop needs to tell "wait quietly, another tab holds this exact
+ * document" apart from "wait and show the user something, or a stalled screen
+ * reads as a broken app instead of a busy one."
+ */
+export class CapacityError extends Error {
+  constructor(message = "The server is busy. Please wait.") {
+    super(message);
+    this.name = "CapacityError";
+  }
+}
+
+/**
  * `fetch` with the bearer token attached, and one forced retry on a 401.
  *
  * Clerk hands out a cached token and only refreshes it near expiry, so a 401 is
@@ -173,10 +188,14 @@ export function useAuthedFetch() {
 
       if (!res.ok) {
         const message = await readErrorMessage(res);
-        // Read the status before it is thrown away. Only 409 needs telling
-        // apart today; everything else is a failure the caller shows verbatim.
+        // Read the status before it is thrown away. Only 409 and 429 need
+        // telling apart today; everything else is a failure the caller shows
+        // verbatim.
         if (res.status === 409) {
           throw new ConflictError(message);
+        }
+        if (res.status === 429) {
+          throw new CapacityError(message);
         }
         throw new Error(message);
       }

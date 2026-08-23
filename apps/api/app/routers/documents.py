@@ -98,6 +98,17 @@ MIN_STEP_BUDGET_SECONDS = 20
 _steps_in_flight: set[str] = set()
 _in_flight_lock = threading.Lock()
 
+# Global ceiling on documents ingesting at once, regardless of who owns them.
+# Each in-flight step holds the downloaded file, every rendered image, and a
+# batch of embedding vectors — comfortably 30-50MB. `_steps_in_flight` already
+# counts them (see below), so this reuses that count rather than adding a
+# second bookkeeping structure. 7 keeps the worst case (all in-flight steps
+# holding the maximum at once) well under half a gigabyte.
+#
+# ponytail: fixed guess, not measured against Railway's actual memory limit.
+# Raise it once that number is known.
+MAX_CONCURRENT_INGEST_STEPS = 7
+
 
 def claim_ingest_step(_user_id: CurrentUser, document_id: UUID) -> Iterator[None]:
     """Take the only ticket to ingest this document, or refuse the request.
@@ -119,6 +130,18 @@ def claim_ingest_step(_user_id: CurrentUser, document_id: UUID) -> Iterator[None
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This document is already being processed.",
             )
+        if len(_steps_in_flight) >= MAX_CONCURRENT_INGEST_STEPS:
+            # 429, not 409: this document isn't in conflict with itself, the
+            # *server* is at capacity. The browser needs to tell the two apart
+            # so it can show "queued, please wait" instead of staying silent
+            # the way it does for the same-document case.
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Lots of documents are being processed right now. Yours is "
+                    "queued and will start automatically — no need to re-upload."
+                ),
+            )
         _steps_in_flight.add(key)
 
     try:
@@ -136,7 +159,10 @@ def claim_ingest_step(_user_id: CurrentUser, document_id: UUID) -> Iterator[None
 # the caller "someone else is doing this one" and stop. Otherwise add it, do the
 # work, and take it off again at the end no matter how the request ended. That
 # is what stops two browser tabs paying twice to embed the very same pages and
-# then tripping over each other's writes.
+# then tripping over each other's writes. On top of that, if the list already
+# has 7 documents on it — from any user, not just this one — a new document is
+# told to wait its turn instead of starting an 8th. That is what stops a burst
+# of uploads from all working at once and using more memory than the server has.
 
 
 @router.get("", response_model=list[DocumentOut])
