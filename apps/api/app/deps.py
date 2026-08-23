@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Annotated, Any
+from typing import Annotated, Any, Iterator
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -333,7 +333,7 @@ def get_supabase_client(
     _user_id: CurrentUser,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> Client:
+) -> Iterator[Client]:
     """A per-request Supabase client that acts as the calling user.
 
     The caller's JWT goes out on every PostgREST request, so Postgres sees
@@ -342,11 +342,20 @@ def get_supabase_client(
 
     Depends on `get_current_user` so the token is always verified before we
     build a client with it.
+
+    A `yield`, not a `return`: `create_client` builds a PostgREST client and a
+    GoTrue (auth) client, each holding its own `httpx.Client`, and nothing
+    used to close them once the request was done. Whatever the handler did
+    with this client — including the write that saved a message or a
+    document row — has already happened by the time `finally` runs, since
+    that only fires after the caller resumes from this `yield`. Closing the
+    connection afterwards cannot lose data that was already committed before
+    the close.
     """
     if credentials is None:  # pragma: no cover — get_current_user already 401s
         raise _unauthorized("Missing bearer token.")
 
-    return create_client(
+    client = create_client(
         settings.supabase_url,
         settings.supabase_anon_key,
         options=ClientOptions(
@@ -357,6 +366,29 @@ def get_supabase_client(
             persist_session=False,
         ),
     )
+    try:
+        yield client
+    finally:
+        # Best-effort: a request that already succeeded (or failed) shouldn't
+        # fail differently because cleanup didn't. The realtime client is left
+        # alone — nothing in this app ever opens its socket (no `.channel()`
+        # call anywhere), so there is nothing there to close.
+        try:
+            client.postgrest.aclose()
+        except Exception:
+            logger.exception("Closing the per-request PostgREST client failed")
+        try:
+            client.auth.close()
+        except Exception:
+            logger.exception("Closing the per-request auth client failed")
+
+
+# In plain English: build a fresh connection for this one request, hand it to
+# whatever needs it, and wait. Once the request is completely done — the
+# answer has been saved, the response is on its way out — take that
+# connection apart instead of leaving it lying around. Nothing about the
+# data changes; this only closes the door after everyone has already left
+# the room.
 
 
 SupabaseClient = Annotated[Client, Depends(get_supabase_client)]
@@ -397,3 +429,24 @@ if __name__ == "__main__":
             )
 
     print("OK - our origins pass, a foreign azp is refused, a missing azp is allowed")
+
+    # get_supabase_client, finding 26: the PostgREST and auth HTTP clients must
+    # both be closed once the request is done, and not before. Builds a real
+    # client against a fake URL — `create_client` makes no network call — then
+    # drives the generator by hand exactly as FastAPI's dependency system does:
+    # advance to the `yield` to get the client, then close the generator to run
+    # its `finally`.
+    fake_settings = SimpleNamespace(
+        supabase_url="https://x.supabase.co", supabase_anon_key="anon-key"
+    )
+    fake_credentials = SimpleNamespace(credentials="fake-jwt")
+    gen = get_supabase_client("user_123", fake_credentials, fake_settings)
+    client = next(gen)
+    assert not client.postgrest.session.is_closed, (
+        "closed before the request even used it"
+    )
+    gen.close()
+    assert client.postgrest.session.is_closed, "postgrest client left open after cleanup"
+    assert client.auth._http_client.is_closed, "auth client left open after cleanup"
+
+    print("OK - get_supabase_client closes postgrest and auth after the request, not before")
