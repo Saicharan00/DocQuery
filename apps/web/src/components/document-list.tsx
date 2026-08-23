@@ -22,6 +22,11 @@ type DocumentListProps = {
    * no Retry beside it, because Retry used to appear only for `failed`.
    */
   abandonedIds: Set<string>;
+  /**
+   * Documents currently waiting for a free ingest slot server-side, not
+   * failed and not abandoned — just queued behind other people's uploads.
+   */
+  queuedIds: Set<string>;
   /** Resume a failed document from wherever it stopped. */
   onRetry: (id: string) => void | Promise<void>;
   /**
@@ -143,6 +148,7 @@ export function DocumentList({
   documents,
   progress,
   abandonedIds,
+  queuedIds,
   onRetry,
   onDeleted,
 }: DocumentListProps) {
@@ -211,14 +217,31 @@ export function DocumentList({
                   poll — the loop driving ingestion already knows where it is.
                   Suppressed once this session has given up, because a progress
                   bar that cannot move is a worse lie than no progress bar. */}
-              {isWorking(document) && !abandonedIds.has(document.id) && (
-                <>
-                  <ChunkGrid step={progress[document.id]} />
+              {isWorking(document) &&
+                !abandonedIds.has(document.id) &&
+                !queuedIds.has(document.id) && (
+                  <>
+                    <ChunkGrid step={progress[document.id]} />
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      {describeProgress(progress[document.id])}
+                    </p>
+                  </>
+                )}
+
+              {/* Shown instead of the progress bar, not alongside it: a queued
+                  document has no step response yet, so the bar would just say
+                  "Reading the document…" forever, which looks identical to
+                  something broken. This is the line that tells a visitor "the
+                  demo is fine, there's just a line" instead of them giving up
+                  on it. */}
+              {isWorking(document) &&
+                !abandonedIds.has(document.id) &&
+                queuedIds.has(document.id) && (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    {describeProgress(progress[document.id])}
+                    Server is busy with other documents right now — yours is
+                    queued and will start automatically.
                   </p>
-                </>
-              )}
+                )}
 
               {/* The row says `processing` but nothing is driving it any more —
                   the server never managed to write the failure down. Without

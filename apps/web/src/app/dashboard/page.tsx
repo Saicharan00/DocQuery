@@ -8,7 +8,13 @@ import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentList } from "@/components/document-list";
 import { UploadZone } from "@/components/upload-zone";
-import { AUTH_WAIT_MS, AuthNotReadyError, ConflictError, useApi } from "@/lib/api";
+import {
+  AUTH_WAIT_MS,
+  AuthNotReadyError,
+  CapacityError,
+  ConflictError,
+  useApi,
+} from "@/lib/api";
 import type { Document, IngestStep } from "@/lib/types";
 
 /** How long to wait after a step that made no progress. Cohere's limit is per minute. */
@@ -164,6 +170,13 @@ export default function DashboardPage() {
     () => new Set(abandonedDocumentIds),
   );
 
+  // Documents currently waiting for a free ingest slot, server-side — not a
+  // failure, just a queue. Plain state (not module-level like
+  // `abandonedDocumentIds`) because being queued is transient: it clears the
+  // moment a step gets through or the loop stops, so nothing needs to survive
+  // a remount.
+  const [queuedIds, setQueuedIds] = useState<Set<string>>(new Set());
+
   // Stop every running loop when the page goes away. `controllers.current` is
   // copied into a local first because by the time the cleanup runs the ref may
   // already point somewhere else — the standard React caveat about reading a
@@ -201,6 +214,16 @@ export default function DashboardPage() {
               signal: controller.signal,
             });
           } catch (e) {
+            if (e instanceof CapacityError) {
+              // The server is busy with other people's documents, not this
+              // one — shown, unlike the ConflictError case below, because the
+              // wait here can run for a while (several other uploads ahead of
+              // this one) and an unexplained stall reads as a broken app.
+              setQueuedIds((current) => new Set(current).add(id));
+              await new Promise((resolve) => setTimeout(resolve, CONFLICT_WAIT_MS));
+              if (controller.signal.aborted) return;
+              continue;
+            }
             if (!(e instanceof ConflictError)) throw e;
             // Somebody else holds this document's step — a second tab, or this
             // page's own previous mount still finishing its request. Neither is
@@ -212,6 +235,17 @@ export default function DashboardPage() {
             if (controller.signal.aborted) return;
             continue;
           }
+
+          // Functional form, not a `queuedIds.has(id)` check first: `queuedIds`
+          // is intentionally not in this callback's deps (see below), so the
+          // closure's copy can be stale. Returning the same Set when the id
+          // isn't present avoids a needless re-render on every ordinary step.
+          setQueuedIds((current) => {
+            if (!current.has(id)) return current;
+            const next = new Set(current);
+            next.delete(id);
+            return next;
+          });
 
           setProgress((current) => ({ ...current, [id]: step }));
           done = step.done;
@@ -260,6 +294,15 @@ export default function DashboardPage() {
       } finally {
         running.current.delete(id);
         controllers.current.delete(id);
+        // Whatever ended the loop, this document is no longer waiting for a
+        // slot — clear it so a badge from an interrupted queue wait can't
+        // linger on a document that stopped being driven.
+        setQueuedIds((current) => {
+          if (!current.has(id)) return current;
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
         // Re-fetch either way: the row now says `ready`, or `failed` with the
         // reason on it. Both are things the list should show.
         //
@@ -374,6 +417,7 @@ export default function DashboardPage() {
               documents={documents}
               progress={progress}
               abandonedIds={abandonedIds}
+              queuedIds={queuedIds}
               onRetry={retry}
               onDeleted={handleDeleted}
             />
