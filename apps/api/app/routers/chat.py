@@ -648,7 +648,7 @@ def chat(
                 ) from exc
 
             try:
-                chunks = rag.retrieve(supabase, query_vector)
+                chunks = rag.retrieve(supabase, query_vector, search_query, k=rag.RERANK_CANDIDATES)
             except Exception as exc:
                 logger.exception("Vector search failed")
                 raise HTTPException(
@@ -665,14 +665,32 @@ def chat(
                     detail="No documents to search yet. Upload one and wait for it to finish processing.",
                 )
 
-            images = rag.load_images(supabase, chunks)
-            # `request.message`, never `search_query`. The user asked "give
-            # count" and that is the question the model answers; the rewrite
-            # existed only to produce a better vector, and it has already done
-            # that. History is in the prompt to make the original question
-            # legible.
-            messages = rag.build_messages(request.message, chunks, images, history)
-            sources = rag.to_sources(chunks)
+            try:
+                chunks = rag.rerank(search_query, chunks)
+            except Exception as exc:
+                logger.exception("Reranking failed")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Could not rank your documents. Please try again.",
+                ) from exc
+
+            # Below this, even the best reranked chunk isn't about the
+            # question — skip images, the prompt, and the paid LLM call
+            # entirely. `generate()` below checks this same flag to emit
+            # `rag.ABSTAIN_MESSAGE` instead of calling `stream_answer`.
+            abstain = chunks[0]["similarity"] < rag.ABSTAIN_THRESHOLD
+
+            if abstain:
+                images, messages, sources = {}, [], []
+            else:
+                images = rag.load_images(supabase, chunks)
+                # `request.message`, never `search_query`. The user asked "give
+                # count" and that is the question the model answers; the rewrite
+                # existed only to produce a better vector, and it has already
+                # done that. History is in the prompt to make the original
+                # question legible.
+                messages = rag.build_messages(request.message, chunks, images, history)
+                sources = rag.to_sources(chunks)
 
             conversation_id, is_new = _resolve_conversation(
                 supabase, user_id, request.conversation_id, request.message
@@ -745,29 +763,38 @@ def chat(
             )
             yield _event("sources", {"sources": sources})
 
-            # This `with` goes around the loop and no higher, and the placement
-            # is the whole trick. Starlette pulls this generator one chunk at a
-            # time, and each pull is a separate hop into the thread pool carrying
-            # a *fresh copy* of the invisible context — so a block opened above
-            # the first `yield` has already been forgotten by the time the loop
-            # starts. Here, entering the block and pulling `stream_answer`'s
-            # first token happen in the same hop, and that first pull is the
-            # moment `@traceable` decides who its parent is. From then on the
-            # span carries its own parent and stops caring about the context.
-            with tracing.parent(root):
-                for text in rag.stream_answer(request.model, messages):
-                    answer.append(text)
-                    yield _event("token", {"text": text})
-                    if time.time() >= deadline:
-                        # Stop mid-answer rather than let the save below fail.
-                        # A cut-off answer that is on screen *and* in the
-                        # history beats a complete one that vanishes on reload.
-                        logger.warning(
-                            "Answer cut short in conversation %s: token expiring",
-                            conversation_id,
-                        )
-                        cut_short = True
-                        break
+            if abstain:
+                # No provider call to make: the outcome is already decided,
+                # and paying for one anyway is exactly what the threshold
+                # exists to avoid. One event stands in for the whole loop
+                # below — the browser can't tell the difference either way,
+                # since both paths just emit `token` events.
+                answer.append(rag.ABSTAIN_MESSAGE)
+                yield _event("token", {"text": rag.ABSTAIN_MESSAGE})
+            else:
+                # This `with` goes around the loop and no higher, and the placement
+                # is the whole trick. Starlette pulls this generator one chunk at a
+                # time, and each pull is a separate hop into the thread pool carrying
+                # a *fresh copy* of the invisible context — so a block opened above
+                # the first `yield` has already been forgotten by the time the loop
+                # starts. Here, entering the block and pulling `stream_answer`'s
+                # first token happen in the same hop, and that first pull is the
+                # moment `@traceable` decides who its parent is. From then on the
+                # span carries its own parent and stops caring about the context.
+                with tracing.parent(root):
+                    for text in rag.stream_answer(request.model, messages):
+                        answer.append(text)
+                        yield _event("token", {"text": text})
+                        if time.time() >= deadline:
+                            # Stop mid-answer rather than let the save below fail.
+                            # A cut-off answer that is on screen *and* in the
+                            # history beats a complete one that vanishes on reload.
+                            logger.warning(
+                                "Answer cut short in conversation %s: token expiring",
+                                conversation_id,
+                            )
+                            cut_short = True
+                            break
 
             full = "".join(answer)
             if not full.strip():
