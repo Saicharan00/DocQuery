@@ -1,6 +1,6 @@
 const THEME_CLASSES = {
-  lavender: { waves: "lavender-waves", ball: "lavender-ball" },
-  sky: { waves: "sky-waves", ball: "sky-ball" },
+  green: { waves: "green-waves", ball: "green-ball" },
+  blue: { waves: "blue-waves", ball: "blue-ball" },
 } as const;
 
 /**

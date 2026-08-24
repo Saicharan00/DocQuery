@@ -152,7 +152,7 @@ export function UploadZone({ onUploaded }: UploadZoneProps) {
           "focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
           isDragging
             ? "border-primary bg-primary/5"
-            : "glass-border-lavender hover:border-primary/50",
+            : "glass-border-green hover:border-primary/50",
           isUploading ? "cursor-wait opacity-70" : "cursor-pointer",
         )}
       >

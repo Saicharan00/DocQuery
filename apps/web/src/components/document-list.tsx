@@ -195,7 +195,7 @@ export function DocumentList({
         </p>
       )}
 
-      <ul className="glass-border-lavender divide-y rounded-lg border">
+      <ul className="glass-border-green divide-y rounded-lg border">
         {documents.map((document) => (
           <li
             key={document.id}
