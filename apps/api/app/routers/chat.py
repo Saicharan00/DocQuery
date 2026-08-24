@@ -677,8 +677,12 @@ def chat(
             # Below this, even the best reranked chunk isn't about the
             # question — skip images, the prompt, and the paid LLM call
             # entirely. `generate()` below checks this same flag to emit
-            # `rag.ABSTAIN_MESSAGE` instead of calling `stream_answer`.
-            abstain = chunks[0]["similarity"] < rag.ABSTAIN_THRESHOLD
+            # `rag.ABSTAIN_MESSAGE` instead of calling `stream_answer`. A
+            # whole-document question never clears this gate on wording
+            # alone, so it's exempted rather than judged by chunk score.
+            abstain = chunks[0]["similarity"] < rag.ABSTAIN_THRESHOLD and not rag.is_broad_question(
+                request.message
+            )
 
             if abstain:
                 images, messages, sources = {}, [], []
