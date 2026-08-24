@@ -198,29 +198,29 @@
    each cycle instead of snapping back). Disabled for users who've asked their
    OS for reduced motion. */
 
-/* Ambient theme behind the documents dashboard: soft lavender waves. */
-.lavender-waves {
+/* Ambient theme behind the documents dashboard: soft green waves. */
+.green-waves {
   background:
-    radial-gradient(40% 40% at 20% 30%, oklch(0.68 0.14 300 / 30%), transparent 70%),
-    radial-gradient(36% 36% at 80% 70%, oklch(0.72 0.12 305 / 26%), transparent 70%),
-    radial-gradient(46% 46% at 50% 90%, oklch(0.7 0.1 295 / 22%), transparent 70%);
+    radial-gradient(40% 40% at 20% 30%, oklch(0.72 0.15 145 / 30%), transparent 70%),
+    radial-gradient(36% 36% at 80% 70%, oklch(0.74 0.13 150 / 26%), transparent 70%),
+    radial-gradient(46% 46% at 50% 90%, oklch(0.72 0.12 140 / 22%), transparent 70%);
   filter: blur(60px);
   animation: aurora-drift 24s ease-in-out infinite alternate;
 }
-.dark .lavender-waves {
+.dark .green-waves {
   opacity: 0.8;
 }
 
-/* Same idea, sky blue, used behind the chat screen. */
-.sky-waves {
+/* Same idea, blue, used behind the chat screen. */
+.blue-waves {
   background:
-    radial-gradient(40% 40% at 25% 25%, oklch(0.75 0.1 235 / 32%), transparent 70%),
-    radial-gradient(36% 36% at 78% 65%, oklch(0.78 0.09 240 / 26%), transparent 70%),
-    radial-gradient(46% 46% at 50% 90%, oklch(0.76 0.08 230 / 22%), transparent 70%);
+    radial-gradient(40% 40% at 25% 25%, oklch(0.7 0.15 255 / 32%), transparent 70%),
+    radial-gradient(36% 36% at 78% 65%, oklch(0.72 0.13 260 / 26%), transparent 70%),
+    radial-gradient(46% 46% at 50% 90%, oklch(0.7 0.12 250 / 22%), transparent 70%);
   filter: blur(60px);
   animation: aurora-drift 24s ease-in-out infinite alternate;
 }
-.dark .sky-waves {
+.dark .blue-waves {
   opacity: 0.8;
 }
 
@@ -273,34 +273,34 @@
   }
 }
 
-.lavender-ball {
+.green-ball {
   background:
     radial-gradient(circle at 32% 28%, oklch(1 0 0 / 55%), transparent 32%),
-    radial-gradient(circle at 65% 70%, oklch(0.55 0.16 300 / 55%), oklch(0.45 0.14 300 / 40%) 75%);
+    radial-gradient(circle at 65% 70%, oklch(0.6 0.17 145 / 55%), oklch(0.5 0.15 145 / 40%) 75%);
 }
 
-.sky-ball {
+.blue-ball {
   background:
     radial-gradient(circle at 32% 28%, oklch(1 0 0 / 55%), transparent 32%),
-    radial-gradient(circle at 65% 70%, oklch(0.65 0.13 235 / 55%), oklch(0.55 0.12 235 / 40%) 75%);
+    radial-gradient(circle at 65% 70%, oklch(0.55 0.18 255 / 55%), oklch(0.45 0.16 255 / 40%) 75%);
 }
 
-/* Dark-lavender / dark-sky-blue text tints for the dashboard and chat
-   screens. Inherited `color`, so it only reaches plain text — elements that
-   set their own color (muted captions, destructive error text) deliberately
-   keep it, since turning error text lavender would make it unreadable as an
+/* Dark-green / dark-blue text tints for the dashboard and chat screens.
+   Inherited `color`, so it only reaches plain text — elements that set
+   their own color (muted captions, destructive error text) deliberately
+   keep it, since turning error text green would make it unreadable as an
    error. */
 .dashboard-text {
-  color: oklch(0.32 0.1 300);
+  color: oklch(0.32 0.1 145);
 }
 .dark .dashboard-text {
-  color: oklch(0.82 0.08 300);
+  color: oklch(0.82 0.08 145);
 }
 .chat-text {
-  color: oklch(0.35 0.1 235);
+  color: oklch(0.35 0.13 255);
 }
 .dark .chat-text {
-  color: oklch(0.84 0.07 235);
+  color: oklch(0.84 0.09 255);
 }
 
 /* Translucent, lightly frosted borders used to frame specific boxes (the
@@ -310,37 +310,37 @@
    border-width/style utility the element already has instead of resetting
    it. Deliberately subtle — a tinted border and a light blur, not a heavy
    frosted-glass panel. */
-.glass-border-lavender {
-  border-color: oklch(0.62 0.14 300 / 55%);
-  background-color: oklch(0.9 0.04 300 / 8%);
+.glass-border-green {
+  border-color: oklch(0.62 0.15 145 / 55%);
+  background-color: oklch(0.9 0.05 145 / 8%);
   backdrop-filter: blur(6px) saturate(120%);
   -webkit-backdrop-filter: blur(6px) saturate(120%);
   box-shadow:
-    0 0 0 1px oklch(0.62 0.14 300 / 10%),
-    0 6px 18px oklch(0.5 0.14 300 / 10%);
+    0 0 0 1px oklch(0.62 0.15 145 / 10%),
+    0 6px 18px oklch(0.5 0.15 145 / 10%);
 }
-.dark .glass-border-lavender {
-  border-color: oklch(0.68 0.12 300 / 40%);
-  background-color: oklch(0.3 0.06 300 / 18%);
+.dark .glass-border-green {
+  border-color: oklch(0.68 0.13 145 / 40%);
+  background-color: oklch(0.3 0.07 145 / 18%);
 }
 
-.glass-border-sky {
-  border-color: oklch(0.65 0.12 235 / 55%);
-  background-color: oklch(0.92 0.03 235 / 8%);
+.glass-border-blue {
+  border-color: oklch(0.6 0.16 255 / 55%);
+  background-color: oklch(0.9 0.04 255 / 8%);
   backdrop-filter: blur(6px) saturate(120%);
   -webkit-backdrop-filter: blur(6px) saturate(120%);
   box-shadow:
-    0 0 0 1px oklch(0.65 0.12 235 / 10%),
-    0 6px 18px oklch(0.5 0.12 235 / 10%);
+    0 0 0 1px oklch(0.6 0.16 255 / 10%),
+    0 6px 18px oklch(0.5 0.16 255 / 10%);
 }
-.dark .glass-border-sky {
-  border-color: oklch(0.68 0.1 235 / 40%);
-  background-color: oklch(0.3 0.05 235 / 18%);
+.dark .glass-border-blue {
+  border-color: oklch(0.65 0.14 255 / 40%);
+  background-color: oklch(0.3 0.06 255 / 18%);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lavender-waves,
-  .sky-waves,
+  .green-waves,
+  .blue-waves,
   .bounce-ball {
     animation: none;
   }

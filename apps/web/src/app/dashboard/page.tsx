@@ -375,7 +375,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <AmbientWaves theme="lavender" />
+      <AmbientWaves theme="green" />
       <main className="dashboard-text p-8">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-semibold">Dashboard</h1>
