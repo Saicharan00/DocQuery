@@ -1,5 +1,6 @@
 import { ConversationSidebar } from "@/components/conversation-sidebar";
 import { ProductFeedback } from "@/components/product-feedback";
+import { AmbientWaves } from "@/components/ambient-waves";
 
 /**
  * The sidebar, the chat, and the product feedback box, side by side.
@@ -19,7 +20,8 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="chat-text flex h-dvh overflow-hidden">
+      <AmbientWaves theme="pink" />
       <ConversationSidebar />
       {children}
       <ProductFeedback />
