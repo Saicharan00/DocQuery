@@ -29,7 +29,15 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <ClerkProvider>{children}</ClerkProvider>
+        {/* Hides Clerk's "development mode" badge via its `options`, not
+            `layout` (that's what the type actually exposes it under). We're
+            still on dev/test Clerk keys underneath (relaxed security, no
+            custom domain) — this only removes the visual reminder. */}
+        <ClerkProvider
+          appearance={{ options: { unsafe_disableDevelopmentModeWarnings: true } }}
+        >
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );
