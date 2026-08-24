@@ -128,3 +128,39 @@
     @apply font-sans;
   }
 }
+
+/* Slow-drifting radial-gradient blobs used behind the sign-in/sign-up card. */
+.auth-aurora {
+  background:
+    radial-gradient(38% 38% at 18% 25%, oklch(0.7 0.12 250 / 30%), transparent 70%),
+    radial-gradient(34% 34% at 82% 18%, oklch(0.75 0.1 300 / 26%), transparent 70%),
+    radial-gradient(42% 42% at 50% 85%, oklch(0.72 0.1 200 / 22%), transparent 70%);
+  filter: blur(60px);
+  animation: aurora-drift 20s ease-in-out infinite alternate;
+}
+
+.dark .auth-aurora {
+  opacity: 0.7;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate(-4%, -3%) scale(1);
+  }
+  50% {
+    transform: translate(4%, 3%) scale(1.08);
+  }
+  100% {
+    transform: translate(-2%, 4%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-aurora {
+    animation: none;
+  }
+}
+/* Three overlapping colored blobs, blurred into soft blobs of light, that
+   slowly slide/scale back and forth forever (alternate = reverses direction
+   each cycle instead of snapping back). Disabled for users who've asked their
+   OS for reduced motion. */
