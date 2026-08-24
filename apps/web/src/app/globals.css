@@ -211,31 +211,43 @@
   opacity: 0.8;
 }
 
-/* Same idea, "strawberry milkshake" pink, used behind the chat screen. */
-.pink-waves {
+/* Same idea, sky blue, used behind the chat screen. */
+.sky-waves {
   background:
-    radial-gradient(40% 40% at 25% 25%, oklch(0.75 0.13 15 / 32%), transparent 70%),
-    radial-gradient(36% 36% at 78% 65%, oklch(0.78 0.11 10 / 26%), transparent 70%),
-    radial-gradient(46% 46% at 50% 90%, oklch(0.76 0.1 20 / 22%), transparent 70%);
+    radial-gradient(40% 40% at 25% 25%, oklch(0.75 0.1 235 / 32%), transparent 70%),
+    radial-gradient(36% 36% at 78% 65%, oklch(0.78 0.09 240 / 26%), transparent 70%),
+    radial-gradient(46% 46% at 50% 90%, oklch(0.76 0.08 230 / 22%), transparent 70%);
   filter: blur(60px);
   animation: aurora-drift 24s ease-in-out infinite alternate;
 }
-.dark .pink-waves {
+.dark .sky-waves {
   opacity: 0.8;
 }
 
-/* Bouncing orb shared by both themes. `left`/`top` are keyed to 4%..96% of
-   its (viewport-fixed) container so it never needs to know the container's
-   actual size, and each axis runs on its own period so the path traces a
-   Lissajous curve instead of a single boring diagonal. `linear` — not
-   ease-in-out — keeps speed constant right up to the wall, so it reads as a
-   bounce (instant reversal) instead of a sway (slow down, drift back). */
+/* Bouncing orb shared by both themes, styled as a glass sphere rather than a
+   soft blurred blob: a crisp circular edge, a glare highlight near the top
+   (where light would catch real glass), a frosted `backdrop-filter` that
+   blurs the wave colors showing through it, and a thin bright rim + soft
+   drop shadow for depth. Kept to medium strength on purpose — light blur,
+   moderate translucency — rather than a heavy frosted-glass look.
+   `left`/`top` are keyed to 4%..96% of its (viewport-fixed) container so it
+   never needs to know the container's actual size, and each axis runs on
+   its own period so the path traces a Lissajous curve instead of a single
+   boring diagonal. `linear` — not ease-in-out — keeps speed constant right
+   up to the wall, so it reads as a bounce (instant reversal) instead of a
+   sway (slow down, drift back). */
 .bounce-ball {
   --ball-size: 130px;
   width: var(--ball-size);
   height: var(--ball-size);
   border-radius: 9999px;
-  filter: blur(8px);
+  border: 1px solid oklch(1 0 0 / 40%);
+  backdrop-filter: blur(6px) saturate(130%);
+  -webkit-backdrop-filter: blur(6px) saturate(130%);
+  box-shadow:
+    inset -10px -12px 20px oklch(0 0 0 / 12%),
+    inset 8px 10px 16px oklch(1 0 0 / 35%),
+    0 14px 30px oklch(0 0 0 / 18%);
   animation:
     bounce-x 17s linear infinite,
     bounce-y 13s linear infinite;
@@ -262,24 +274,18 @@
 }
 
 .lavender-ball {
-  background: radial-gradient(
-    circle at 35% 35%,
-    oklch(0.5 0.16 300 / 90%),
-    oklch(0.4 0.14 300 / 70%) 70%,
-    transparent 100%
-  );
+  background:
+    radial-gradient(circle at 32% 28%, oklch(1 0 0 / 55%), transparent 32%),
+    radial-gradient(circle at 65% 70%, oklch(0.55 0.16 300 / 55%), oklch(0.45 0.14 300 / 40%) 75%);
 }
 
-.pink-ball {
-  background: radial-gradient(
-    circle at 35% 35%,
-    oklch(0.62 0.17 10 / 90%),
-    oklch(0.52 0.15 10 / 70%) 70%,
-    transparent 100%
-  );
+.sky-ball {
+  background:
+    radial-gradient(circle at 32% 28%, oklch(1 0 0 / 55%), transparent 32%),
+    radial-gradient(circle at 65% 70%, oklch(0.65 0.13 235 / 55%), oklch(0.55 0.12 235 / 40%) 75%);
 }
 
-/* Dark-lavender / dark-strawberry text tints for the dashboard and chat
+/* Dark-lavender / dark-sky-blue text tints for the dashboard and chat
    screens. Inherited `color`, so it only reaches plain text — elements that
    set their own color (muted captions, destructive error text) deliberately
    keep it, since turning error text lavender would make it unreadable as an
@@ -291,15 +297,15 @@
   color: oklch(0.82 0.08 300);
 }
 .chat-text {
-  color: oklch(0.4 0.13 12);
+  color: oklch(0.35 0.1 235);
 }
 .dark .chat-text {
-  color: oklch(0.84 0.09 12);
+  color: oklch(0.84 0.07 235);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .lavender-waves,
-  .pink-waves,
+  .sky-waves,
   .bounce-ball {
     animation: none;
   }
