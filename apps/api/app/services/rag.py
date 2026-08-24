@@ -266,8 +266,7 @@ def rerank(query_text: str, chunks: list[dict], top_n: int = RETRIEVE_K) -> list
     beyond the image-retrieval ceiling already on record from Day 10c.
 
     `similarity` (raw cosine, set by `retrieve`) survives on every chunk dict
-    untouched — only the order changes here. The abstention check downstream
-    reads whichever chunk ends up first after this reordering.
+    untouched — only the order changes here.
     """
     if not chunks:
         return chunks
@@ -281,6 +280,53 @@ def rerank(query_text: str, chunks: list[dict], top_n: int = RETRIEVE_K) -> list
     # Cohere's rerank endpoint, get back the positions of the best `top_n` of
     # them (best first), and use those positions to pick the actual chunk
     # dictionaries back out of the original list — in the new, better order.
+
+
+@traceable(run_type="tool", process_inputs=tracing.clean_inputs, process_outputs=tracing.redact)
+def ensure_opening_chunks(supabase, chunks: list[dict]) -> list[dict]:
+    """Guarantee each represented document's first chunk is present, not just
+    whatever ranked highest against the question's wording.
+
+    A paper's abstract or a report's opening section is what actually answers
+    "what is this about" — and it rarely wins reranking against that literal
+    question, the same mismatch that broke the old abstain gate. Applied to
+    every question's chunk list the same way, regardless of what was asked:
+    no question-shape detection involved. A whole-document question benefits
+    because its context is simply always there; a specific question just
+    carries one extra source it has no reason to cite.
+
+    Fetched directly by `(document_id, chunk_index=0)` rather than through
+    retrieval/reranking — the opening chunk does not need to score well
+    against the question to be included, only to exist.
+    """
+    have_opening = {c["document_id"] for c in chunks if c["chunk_index"] == 0}
+    document_names = {c["document_id"]: c["document_name"] for c in chunks}
+    missing = document_names.keys() - have_opening
+    if not missing:
+        return chunks
+
+    extra: list[dict] = []
+    for document_id in missing:
+        response = (
+            supabase.table("chunks")
+            .select("id,document_id,content,chunk_index,chunk_type,image_path,page_number")
+            .eq("document_id", document_id)
+            .eq("chunk_index", 0)
+            .limit(1)
+            .execute()
+        )
+        for row in response.data or []:
+            row["document_name"] = document_names[document_id]
+            row["similarity"] = None
+            extra.append(row)
+
+    return chunks + extra
+
+    # In plain English: look at which documents are already represented in the
+    # answer's sources, and check whether each one's very first chunk is among
+    # them. For any document whose opening chunk is missing, fetch it straight
+    # from the database by id and index — no scoring, no ranking — and add it
+    # to the list the model will read.
 
 
 @traceable(
