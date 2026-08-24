@@ -675,7 +675,7 @@ export function ChatView({
     // it would each grab half the free width and the chat would sit far left of
     // centre. Without it the chat takes its natural width — 48rem, or the whole
     // space on a narrower screen — and the box gets exactly what is left over.
-    <main className="glass-border-sky mx-auto flex w-full max-w-3xl flex-col rounded-lg border p-4">
+    <main className="glass-border-blue mx-auto flex w-full max-w-3xl flex-col rounded-lg border p-4">
       <header className="flex items-center gap-3 border-b pb-3">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/dashboard">
