@@ -198,7 +198,7 @@ export function ConversationSidebar() {
   );
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r">
+    <aside className="glass-border-sky flex w-64 shrink-0 flex-col border-r">
       <div className="p-3">
         <Button asChild size="sm" className="w-full">
           <Link href={CHAT_PATH}>
