@@ -303,6 +303,41 @@
   color: oklch(0.84 0.07 235);
 }
 
+/* Translucent, lightly frosted borders used to frame specific boxes (the
+   upload dropzone, the documents list, the chat panel, the chat sidebar) in
+   their section's accent color. Only `border-color`/background/shadow are
+   set here, not the `border` shorthand, so it layers on top of whatever
+   border-width/style utility the element already has instead of resetting
+   it. Deliberately subtle — a tinted border and a light blur, not a heavy
+   frosted-glass panel. */
+.glass-border-lavender {
+  border-color: oklch(0.62 0.14 300 / 55%);
+  background-color: oklch(0.9 0.04 300 / 8%);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  box-shadow:
+    0 0 0 1px oklch(0.62 0.14 300 / 10%),
+    0 6px 18px oklch(0.5 0.14 300 / 10%);
+}
+.dark .glass-border-lavender {
+  border-color: oklch(0.68 0.12 300 / 40%);
+  background-color: oklch(0.3 0.06 300 / 18%);
+}
+
+.glass-border-sky {
+  border-color: oklch(0.65 0.12 235 / 55%);
+  background-color: oklch(0.92 0.03 235 / 8%);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  box-shadow:
+    0 0 0 1px oklch(0.65 0.12 235 / 10%),
+    0 6px 18px oklch(0.5 0.12 235 / 10%);
+}
+.dark .glass-border-sky {
+  border-color: oklch(0.68 0.1 235 / 40%);
+  background-color: oklch(0.3 0.05 235 / 18%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lavender-waves,
   .sky-waves,
