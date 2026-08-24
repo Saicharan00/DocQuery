@@ -19,6 +19,7 @@ export function AuthShell({
       />
       <div className="animate-in fade-in zoom-in-95 slide-in-from-bottom-4 relative z-10 flex w-full max-w-md flex-col items-center gap-6 duration-700">
         <div className="flex flex-col items-center gap-1 text-center">
+          <img src="/pyramid-logo.svg" alt="" className="mb-1 h-8 w-8" />
           <span className="text-xs font-semibold tracking-[0.2em] text-muted-foreground uppercase">
             DocQuery
           </span>
