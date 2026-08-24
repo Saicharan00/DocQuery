@@ -674,6 +674,17 @@ def chat(
                     detail="Could not rank your documents. Please try again.",
                 ) from exc
 
+            # A document's opening section is what actually answers "what is
+            # this about," and it rarely reranks well against that literal
+            # question — added unconditionally, not just when the question
+            # looks broad, so this doesn't reintroduce question-shape guessing.
+            try:
+                chunks = rag.ensure_opening_chunks(supabase, chunks)
+            except Exception:
+                # An answer missing its bonus context beats a 502 over a
+                # nice-to-have; the normal chunks are still there.
+                logger.exception("Could not fetch opening chunks")
+
             # No pre-LLM abstain gate: a chunk-similarity score can't tell a
             # genuinely off-topic question from a whole-document one worded
             # differently than any passage. The model decides from the actual
