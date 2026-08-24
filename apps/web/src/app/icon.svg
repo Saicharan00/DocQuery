@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <linearGradient id="litFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#C4B5FD"/>
+      <stop offset="100%" stop-color="#7DD3FC"/>
+    </linearGradient>
+    <linearGradient id="shadowFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#0284C7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Front-left face: lavender (#C4B5FD) → sky blue (#7DD3FC) -->
+  <polygon points="120,86 42,155 120,200" fill="url(#litFace)"/>
+
+  <!-- Front-right face: darker tone for depth -->
+  <polygon points="120,86 120,200 198,155" fill="url(#shadowFace)"/>
+</svg>

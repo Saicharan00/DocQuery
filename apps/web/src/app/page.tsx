@@ -4,7 +4,10 @@ import { Button } from "@/components/ui/button";
 export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 text-center">
-      <h1 className="text-3xl font-semibold">DocQuery</h1>
+      <div className="flex items-center gap-3">
+        <img src="/pyramid-logo.svg" alt="" className="h-9 w-9" />
+        <h1 className="text-3xl font-semibold">DocQuery</h1>
+      </div>
       <p className="max-w-md text-zinc-600 dark:text-zinc-400">
         Upload a document, ask questions about it, and see the exact passages
         every answer was built from.
