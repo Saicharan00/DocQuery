@@ -429,17 +429,27 @@ against the literal question.
 | + Reranking (final pipeline) | 100% | 100% | 0.854 |
 
 
-**Abstention threshold, set conservatively rather than precisely.** The
+**Abstention: a similarity gate, then a model judgment call.** The
 original plan assumed a clean similarity gap between answerable and
 unanswerable questions. Day 11's actual numbers didn't show one: the two
 adversarial questions' similarity scores landed inside the range of
-genuinely answerable questions, not below it. The threshold was set as a
-floor below the lowest score seen on any real answerable question instead,
-which catches clearly off-topic questions (verified live: a cooking
-question against this corpus returns "I don't see this in your documents"
-with no LLM call made) but does not catch the two adversarial questions by
-design. That's a real product and cost improvement, just not the precise
-classifier the original plan assumed it would be.
+genuinely answerable questions, not below it. A conservative floor was set
+below the lowest score seen on any real answerable question instead — it
+caught clearly off-topic questions for free (no LLM call) but, by
+construction, never caught the two adversarial ones.
+
+It also turned out to refuse a class of question nobody had tried yet:
+"what is this document about" never resembles any single passage closely,
+so a perfectly good upload still scored below the floor. No fixed list of
+"broad question" phrasings closes that gap for every rephrasing — one was
+tried, and missed "what is this **book** about" on the very next test.
+The similarity gate is retired. `SYSTEM_PROMPT` now instructs the model to
+answer with the exact abstain message itself when the sources don't cover
+the question, a call made by reading the actual content instead of scoring
+word overlap with one chunk. The cost tradeoff flips: every question now
+costs one paid call, including ones that end up abstaining — bounded by
+the same per-user daily caps as everything else, and worth it for a
+question shape a real visitor asks first.
 
 **Prompt injection: a structural defense is now in place.** A realistic
 injected instruction (a fake "your account is suspended" redirect hidden
