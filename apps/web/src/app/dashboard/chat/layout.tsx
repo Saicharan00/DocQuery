@@ -21,7 +21,7 @@ export default function ChatLayout({
 }) {
   return (
     <div className="chat-text flex h-dvh overflow-hidden">
-      <AmbientWaves theme="pink" />
+      <AmbientWaves theme="sky" />
       <ConversationSidebar />
       {children}
       <ProductFeedback />
