@@ -25,11 +25,15 @@ export function AuthShell({
           <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
           <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
-        {children}
+        <div className="relative w-full">
+          <div className="card-glow pointer-events-none absolute -inset-8 -z-10" aria-hidden />
+          {children}
+        </div>
       </div>
     </div>
   );
 }
 // Wraps a Clerk auth widget with a centered card that fades/zooms in on load,
-// sitting in front of a soft moving color glow and a faint grid, on a plain
-// background otherwise so it stays readable and fast (no images, no JS animation).
+// sitting in front of a page-wide moving color glow and a faint grid, plus a
+// tighter lavender "wave" glow hugging the card itself, on a plain background
+// otherwise so it stays readable and fast (no images, no JS animation).

@@ -132,15 +132,48 @@
 /* Slow-drifting radial-gradient blobs used behind the sign-in/sign-up card. */
 .auth-aurora {
   background:
-    radial-gradient(38% 38% at 18% 25%, oklch(0.7 0.12 250 / 30%), transparent 70%),
-    radial-gradient(34% 34% at 82% 18%, oklch(0.75 0.1 300 / 26%), transparent 70%),
-    radial-gradient(42% 42% at 50% 85%, oklch(0.72 0.1 200 / 22%), transparent 70%);
-  filter: blur(60px);
+    radial-gradient(40% 40% at 18% 25%, oklch(0.7 0.14 250 / 48%), transparent 70%),
+    radial-gradient(36% 36% at 82% 18%, oklch(0.72 0.13 300 / 44%), transparent 70%),
+    radial-gradient(44% 44% at 50% 85%, oklch(0.72 0.12 200 / 38%), transparent 70%);
+  filter: blur(55px);
   animation: aurora-drift 20s ease-in-out infinite alternate;
 }
 
 .dark .auth-aurora {
-  opacity: 0.7;
+  opacity: 0.85;
+}
+
+/* Lavender glow that hugs the card itself, sitting closer and darker than
+   the page-wide aurora above, with its own slow scale/opacity "wave". */
+.card-glow {
+  background: radial-gradient(60% 60% at 50% 40%, oklch(0.52 0.15 300 / 60%), transparent 75%);
+  filter: blur(45px);
+  animation: card-glow-wave 9s ease-in-out infinite alternate;
+}
+
+.dark .card-glow {
+  opacity: 0.9;
+}
+
+@keyframes card-glow-wave {
+  0% {
+    transform: scale(1) translateY(0);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15) translateY(-8px);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(6px);
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-glow {
+    animation: none;
+  }
 }
 
 @keyframes aurora-drift {
