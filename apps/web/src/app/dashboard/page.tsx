@@ -8,6 +8,7 @@ import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentList } from "@/components/document-list";
 import { UploadZone } from "@/components/upload-zone";
+import { AmbientWaves } from "@/components/ambient-waves";
 import {
   AUTH_WAIT_MS,
   AuthNotReadyError,
@@ -373,57 +374,60 @@ export default function DashboardPage() {
   }, [documents, ingest]);
 
   return (
-    <main className="p-8">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+    <>
+      <AmbientWaves theme="lavender" />
+      <main className="dashboard-text p-8">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
 
-        <div className="flex items-center gap-3">
-          {/* The only way to reach the chat page until Day 9 builds the
-              sidebar that would normally hold this. */}
-          <Button asChild size="sm">
-            <Link href="/dashboard/chat">
-              <MessageSquare />
-              Chat
-            </Link>
-          </Button>
-          <UserButton />
+          <div className="flex items-center gap-3">
+            {/* The only way to reach the chat page until Day 9 builds the
+                sidebar that would normally hold this. */}
+            <Button asChild size="sm">
+              <Link href="/dashboard/chat">
+                <MessageSquare />
+                Chat
+              </Link>
+            </Button>
+            <UserButton />
+          </div>
         </div>
-      </div>
 
-      <p className="text-sm text-muted-foreground">
-        Signed in as {user?.primaryEmailAddress?.emailAddress}
-      </p>
+        <p className="text-sm text-muted-foreground">
+          Signed in as {user?.primaryEmailAddress?.emailAddress}
+        </p>
 
-      <section className="mt-8 border-t pt-6">
-        <h2 className="font-medium mb-3">Documents</h2>
+        <section className="mt-8 border-t pt-6">
+          <h2 className="font-medium mb-3">Documents</h2>
 
-        {/* Both children get `refreshDocuments`: a finished upload or delete
-            re-fetches rather than editing the list locally, so what you see is
-            what the server actually has. It is also the call Day 6 will poll
-            to watch pending -> processing -> ready. */}
-        <UploadZone onUploaded={handleUploaded} />
+          {/* Both children get `refreshDocuments`: a finished upload or delete
+              re-fetches rather than editing the list locally, so what you see is
+              what the server actually has. It is also the call Day 6 will poll
+              to watch pending -> processing -> ready. */}
+          <UploadZone onUploaded={handleUploaded} />
 
-        <div className="mt-6">
-          {documentsError && (
-            <p role="alert" className="text-sm text-destructive">
-              Error: {documentsError}
-            </p>
-          )}
-          {!documents && !documentsError && (
-            <p className="text-sm text-muted-foreground">Loading documents…</p>
-          )}
-          {documents && (
-            <DocumentList
-              documents={documents}
-              progress={progress}
-              abandonedIds={abandonedIds}
-              queuedIds={queuedIds}
-              onRetry={retry}
-              onDeleted={handleDeleted}
-            />
-          )}
-        </div>
-      </section>
-    </main>
+          <div className="mt-6">
+            {documentsError && (
+              <p role="alert" className="text-sm text-destructive">
+                Error: {documentsError}
+              </p>
+            )}
+            {!documents && !documentsError && (
+              <p className="text-sm text-muted-foreground">Loading documents…</p>
+            )}
+            {documents && (
+              <DocumentList
+                documents={documents}
+                progress={progress}
+                abandonedIds={abandonedIds}
+                queuedIds={queuedIds}
+                onRetry={retry}
+                onDeleted={handleDeleted}
+              />
+            )}
+          </div>
+        </section>
+      </main>
+    </>
   );
 }
