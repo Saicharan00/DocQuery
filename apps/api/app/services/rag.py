@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 
 import litellm
 from langsmith import traceable
@@ -72,6 +73,27 @@ RERANK_CANDIDATES = 20
 ABSTAIN_THRESHOLD = 0.30
 
 ABSTAIN_MESSAGE = "I don't see this in your documents."
+
+# A question about the *whole* document ("what is this PDF about", "summarize
+# this") doesn't textually resemble any single chunk, so ABSTAIN_THRESHOLD's
+# per-chunk score would refuse it even on a perfectly good upload — the gate
+# was built to catch questions with no relevant content, not ones shaped
+# differently from a passage. Checked against what the user actually typed,
+# not the rewritten search query, since intent lives in their own wording.
+# ponytail: phrase match, not real intent detection — misses rephrasings this
+# list doesn't cover. Upgrade path is the LLM-as-judge grader already
+# deferred above, once that exists, would also settle this.
+BROAD_QUESTION_RE = re.compile(
+    r"what (?:is|are|does) (?:this|these|the) (?:document|doc|pdf|file)s?\b"
+    r"|what(?:'s| is) (?:in|on) (?:this|the) (?:document|doc|pdf|file)\b"
+    r"|\b(?:summarize|summary|overview|tl;?dr)\b",
+    re.IGNORECASE,
+)
+
+
+def is_broad_question(question: str) -> bool:
+    """True if the question asks about the document as a whole rather than a specific passage."""
+    return bool(BROAD_QUESTION_RE.search(question))
 
 # Ceiling on one answer. Not a quality setting — a brake. Without it a model
 # that decides to enumerate a whole document bills the full output window.
