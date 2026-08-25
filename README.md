@@ -538,4 +538,13 @@ and reranking used to be on this list, they're built and measured under
 - **Semantic chunking.** A smarter alternative to fixed-size chunking, but
   the eval found no retrieval failures traceable to chunk boundaries, so
   there's no measured problem for it to solve yet.
+- **Document-metadata questions** ("how many pages is this?", "when was
+  this uploaded?"). The app only ever shows the model the handful of
+  passages retrieval judged most relevant to the question, never the whole
+  document, so a fact like total page count — true of the file, but not
+  stated in any single passage's text — correctly reads as "not in the
+  sources" rather than getting guessed. Answering this class of question
+  would mean a separate, non-retrieval code path that reads metadata
+  directly instead of searching content; not built, since retrieval-based
+  Q&A was the actual thing being demonstrated.
 
