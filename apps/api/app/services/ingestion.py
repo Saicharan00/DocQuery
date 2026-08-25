@@ -49,9 +49,17 @@ RERANK_MODEL = "rerank-v4.0-fast"
 EMBED_BATCH_SIZE = 96
 
 # embed-v4 sets no limit on how many images one request may carry; the ceiling
-# is 20MB of them combined. Eight crops at roughly 100KB each leaves an
-# enormous margin, and a smaller batch also loses less work to a rate limit.
-IMAGE_EMBED_BATCH_SIZE = 8
+# is 20MB of them combined, and three crops at roughly 100KB each leaves an
+# enormous margin either way — Cohere's limit was never the tight constraint.
+#
+# The real constraint since Day 12 is captioning, not embedding: `documents.py`
+# requires every image in a group to be captioned before any of them are
+# written, so one slow or timed-out caption discards the whole group's
+# already-successful work too. Kept at or below `CAPTION_CONCURRENCY` in
+# `documents.py` so a group always runs as a single concurrent wave rather
+# than a wave plus a straggler — and small on purpose, so a timeout wastes at
+# most 2 finished captions instead of up to 7.
+IMAGE_EMBED_BATCH_SIZE = 3
 
 # ...and the margin was assumed rather than enforced, which is the whole of
 # finding 20. "Roughly 100KB each" describes a figure cropped out of a text
@@ -821,14 +829,20 @@ if __name__ == "__main__":
         return sum(4 * ((len(j) + 2) // 3) + len(_DATA_URI_PREFIX) for j in group)
 
     # Ordinary figures: nothing should be split, or every ingest pays extra
-    # round trips for a problem it does not have.
-    small = [b"x" * 100_000] * 8
+    # round trips for a problem it does not have. Sized off the constant
+    # rather than a hardcoded 8, so this keeps meaning the same thing if
+    # IMAGE_EMBED_BATCH_SIZE changes again.
+    small = [b"x" * 100_000] * IMAGE_EMBED_BATCH_SIZE
     assert list(_image_batches(small)) == [small], (
-        "eight ordinary crops were split — this batching should be invisible to them"
+        f"{IMAGE_EMBED_BATCH_SIZE} ordinary crops were split — this batching "
+        "should be invisible to them"
     )
 
-    # Scanned pages: eight of these is the 11-16MB request that gets refused.
-    scanned = [b"x" * 3_000_000] * 8
+    # Scanned pages: each image alone is already a third of the byte ceiling,
+    # so weight forces a split well before the count cap ever would — this is
+    # what proves finding 20 (batches must fit by *weight*, not only by
+    # count) still holds no matter how small IMAGE_EMBED_BATCH_SIZE gets.
+    scanned = [b"x" * (MAX_IMAGE_REQUEST_BYTES // 2)] * (IMAGE_EMBED_BATCH_SIZE * 3)
     groups = list(_image_batches(scanned))
     assert len(groups) > 1, "an oversized batch was not split — finding 20 is still open"
     assert sum(len(g) for g in groups) == len(scanned), "images were lost or duplicated"
@@ -847,5 +861,5 @@ if __name__ == "__main__":
     print(
         f"OK — {len(first_images)} images, deterministic, all on page 1 ({sizes}); "
         f"deck kept {len(deck_images)}/6 charts; logo still filtered; "
-        f"8 scanned pages split into {len(groups)} requests, all under the ceiling"
+        f"{len(scanned)} scanned pages split into {len(groups)} requests, all under the ceiling"
     )

@@ -117,11 +117,14 @@ MAX_CONCURRENT_INGEST_STEPS = 7
 # is what closed the "still open" item from Day 12's learning log, where a
 # 75-image document was slow because captioning was strictly sequential.
 #
-# Not set to IMAGE_EMBED_BATCH_SIZE (8): that number already ignores this
-# router's own MAX_CONCURRENT_INGEST_STEPS, which lets 7 documents ingest at
-# once. 8-wide bursts here would mean up to 56 simultaneous calls to the same
-# LLM key at peak load. 5 keeps most of the speedup while leaving headroom
-# under that stacked worst case.
+# Sized as a ceiling, not a target: `ingestion.IMAGE_EMBED_BATCH_SIZE` (3) is
+# what actually decides how many calls run at once today, since a batch never
+# hands the pool more images than that. Left higher than the batch size on
+# purpose — raising the batch size later (to save on retried work, say)
+# should not also require remembering to revisit this number; it already
+# caps the burst independently. `MAX_CONCURRENT_INGEST_STEPS` lets 7
+# documents ingest at once, so this is also the ceiling on how many
+# simultaneous calls one document can add to that pile.
 CAPTION_CONCURRENCY = 5
 
 
