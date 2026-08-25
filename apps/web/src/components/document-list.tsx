@@ -5,7 +5,7 @@ import { FileText, Loader2, RotateCw, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AuthNotReadyError, useApi } from "@/lib/api";
+import { AuthNotReadyError } from "@/lib/api";
 import type { Document, DocumentStatus, IngestStep } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -30,11 +30,12 @@ type DocumentListProps = {
   /** Resume a failed document from wherever it stopped. */
   onRetry: (id: string) => void | Promise<void>;
   /**
-   * Called after a successful delete so the parent can re-fetch the list.
-   * Takes the deleted id so the parent can also tell an ingest loop still
-   * driving that document that its next 404 is expected, not a failure.
+   * Delete a document, including one still mid-ingestion. The parent owns
+   * this rather than this component calling the API directly, because
+   * deleting a document that's still being driven needs to stop that
+   * document's own ingest loop first — machinery only the parent has.
    */
-  onDeleted: (id: string) => void | Promise<void>;
+  onDelete: (id: string) => void | Promise<void>;
 };
 
 /** The four states a document moves through as it is ingested. */
@@ -150,22 +151,21 @@ export function DocumentList({
   abandonedIds,
   queuedIds,
   onRetry,
-  onDeleted,
+  onDelete,
 }: DocumentListProps) {
-  const api = useApi();
-
   // Which row is mid-delete, so only that button shows a spinner.
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const remove = useCallback(
-    async (id: string) => {
+    async (id: string, name: string) => {
+      if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+
       setError(null);
       setDeletingId(id);
 
       try {
-        await api(`/documents/${id}`, { method: "DELETE" });
-        await onDeleted(id);
+        await onDelete(id);
       } catch (e) {
         if (e instanceof AuthNotReadyError) {
           setError("Still signing you in. Try again in a moment.");
@@ -176,7 +176,7 @@ export function DocumentList({
         setDeletingId(null);
       }
     },
-    [api, onDeleted],
+    [onDelete],
   );
 
   if (documents.length === 0) {
@@ -288,7 +288,7 @@ export function DocumentList({
               size="icon-sm"
               aria-label={`Delete ${document.name}`}
               disabled={deletingId === document.id}
-              onClick={() => void remove(document.id)}
+              onClick={() => void remove(document.id, document.name)}
             >
               {deletingId === document.id ? (
                 <Loader2 className="animate-spin" />

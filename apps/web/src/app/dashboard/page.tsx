@@ -30,6 +30,19 @@ const RATE_LIMIT_WAIT_MS = 20_000;
 const CONFLICT_WAIT_MS = 2_000;
 
 /**
+ * How long a delete keeps retrying a 409 before giving up.
+ *
+ * A document mid-ingestion holds its claim for at most STEP_BUDGET_SECONDS
+ * (45s server-side) per step — `documents.py` promises "seconds, not minutes"
+ * for exactly this wait. `handleDelete` below also aborts this document's own
+ * ingest loop first, so in practice this only ever has to outlast whichever
+ * single step happened to already be in flight when delete was clicked, not a
+ * whole document's worth of them. Set a bit above that one-step ceiling for
+ * margin.
+ */
+const DELETE_WAIT_CEILING_MS = 60_000;
+
+/**
  * Documents this tab has given up on. Deliberately outside the component.
  *
  * As a ref it died with the component, and that was a bug worth money: leaving
@@ -344,16 +357,49 @@ export default function DashboardPage() {
     [ingest],
   );
 
-  const handleDeleted = useCallback(
+  const handleDelete = useCallback(
     async (id: string) => {
-      // Marked before the refetch below, so it's in place by the time it
-      // could possibly matter — the ingest loop's own next request, sent
-      // independently, is the only other thing racing to read this set.
+      // Stop this document's own ingest loop from claiming another step.
+      // Without this, the loop re-claims within milliseconds of each step
+      // finishing, and a delete polling every couple of seconds would almost
+      // never win that race — it would look "stuck" for as long as the
+      // document takes to finish on its own, which can be minutes.
+      controllers.current.get(id)?.abort();
+      // Marked before the retry loop below, so it's in place by the time it
+      // could possibly matter — the ingest loop's own in-flight request,
+      // already sent before the abort above could reach it, is the only
+      // other thing racing to read this set.
       deletedIds.current.add(id);
+
+      const deadline = Date.now() + DELETE_WAIT_CEILING_MS;
+
+      while (true) {
+        try {
+          await api(`/documents/${id}`, { method: "DELETE" });
+          break;
+        } catch (e) {
+          // The request that was already in flight when we aborted the loop
+          // above cannot be recalled — up to STEP_BUDGET_SECONDS of it may
+          // still be running server-side, holding the claim this delete
+          // needs. Wait for it to finish and ask again, the same way the
+          // ingest loop itself waits out a conflict.
+          if (e instanceof ConflictError && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, CONFLICT_WAIT_MS));
+            continue;
+          }
+          throw e;
+        }
+      }
+
       await refreshDocuments();
     },
-    [refreshDocuments],
+    [api, refreshDocuments],
   );
+
+  // In plain English: tell this document's own upload loop to stop asking for
+  // more work, then ask the server to delete it. If the server says "not yet,
+  // something is still writing to this document," wait a couple of seconds
+  // and ask again — up to a full minute — instead of giving up after one try.
 
   // `refreshDocuments` now answers *whether the load settled*, which the auth
   // ceiling above needs but these two children do not. Both keep the callback
@@ -406,6 +452,12 @@ export default function DashboardPage() {
               to watch pending -> processing -> ready. */}
           <UploadZone onUploaded={handleUploaded} />
 
+          <p className="mt-3 text-xs text-muted-foreground">
+            Documents with charts or figures take a little longer — each image
+            gets described by a vision model before it&apos;s searchable.
+            Thanks for your patience.
+          </p>
+
           <div className="mt-6">
             {documentsError && (
               <p role="alert" className="text-sm text-destructive">
@@ -422,7 +474,7 @@ export default function DashboardPage() {
                 abandonedIds={abandonedIds}
                 queuedIds={queuedIds}
                 onRetry={retry}
-                onDeleted={handleDeleted}
+                onDelete={handleDelete}
               />
             )}
           </div>
