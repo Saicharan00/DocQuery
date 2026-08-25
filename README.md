@@ -461,6 +461,21 @@ command, and `build_messages` wraps each source in `<<<SOURCE>>>...
 <<<END SOURCE>>>` delimiters so that boundary is structural, not just a
 sentence the model could be argued past.
 
+### Day 12: image captioning, measured
+
+**Fixed the figure-retrieval ceiling.** Figures used to be embedded straight
+from their pixels, which measured a ~0.18-0.25 similarity band against a
+typed question — functionally noise. Each figure is now captioned by a
+vision model at ingestion time, and the *caption* is embedded instead, in
+the same vector space every text chunk already uses. The one figure question
+in the eval set moved from rank #2 to rank **#1** (MRR 0.50 → 1.00,
+similarity 0.4957); a direct caption-vs-question smoke test measured 0.5371,
+well clear of the old band. All pre-existing image chunks were backfilled,
+not just new uploads. Generation accuracy is unchanged by design — the
+answering model still reads the real image, not the caption, so this fixes
+*finding* the right figure, not *reading* it once found. Full numbers:
+[`scripts/eval_results.md` §11](scripts/eval_results.md).
+
 ## Known limitations
 
 Real gaps the eval surfaced, still standing:
@@ -473,12 +488,11 @@ Real gaps the eval surfaced, still standing:
   extracts with reading order that doesn't reliably track a table's visual
   position on the page, so a row's label and its value can end up separated
   in the parsed text.
-- **The figure-retrieval ceiling.** Figures are embedded from pixels alone,
-  with no caption text attached, so visually similar diagrams cluster
-  together and can be hard to tell apart by vector search. Even once the
-  right image is retrieved, the answering model still has to read it
-  correctly, and one of the two supported models has been observed
-  misreading a diagram's block order.
+- **A model can still misread a figure once it's found.** Day 12 fixed
+  *finding* the right figure (see above) — it can't fix a vision model
+  misreading what's in it. One of the two supported models has been
+  observed misreading a diagram's block order even when it's looking at
+  the correct image.
 - **Abstention is a floor, not a classifier.** It reliably catches questions
   with nothing relevant in the corpus, but adversarial questions that sit
   inside the normal similarity range for legitimate questions get past it

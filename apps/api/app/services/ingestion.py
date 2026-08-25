@@ -160,9 +160,13 @@ class Chunk:
     """One slice of a document, ready to be embedded and stored.
 
     An image chunk is the same thing carrying a JPEG: `image` holds the picture
-    and `content` holds only a label like "[Image from page 4]", because
-    `chunks.content` is `not null` in the schema. The label is never what gets
-    embedded — the picture is.
+    and `content` starts out as a placeholder label like "[Image from page 4]",
+    because `chunks.content` is `not null` in the schema. Day 12: the caller
+    (`routers/documents.py`) replaces this placeholder with a real caption from
+    `rag.caption_image` before the row is written, and embeds that caption
+    instead of the picture — a typed question can match a caption's words in a
+    way it never could a raw pixel vector. `Chunk.content` itself stays the
+    placeholder; it exists only to satisfy the `not null` column until then.
     """
 
     index: int

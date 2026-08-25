@@ -686,6 +686,13 @@ Free if obeyed now. Costs a full rewrite of all 18 questions if remembered later
      >
      > Deliberately **not fixed before this measurement exists**, so Day 11.5 can carry a
      > real before/after row. The candidates are in the Day 11.5 list below.
+     >
+     > **Fixed 2026-08-24 (Day 12), not Day 11.5 as originally planned here** — reranking
+     > (Day 11.5) helped find chunks that already had matchable text, but a pixel-only image
+     > chunk still had none to match. The actual fix: caption each figure with a vision model
+     > at ingestion and embed the caption instead of the pixels. Real before/after row, not an
+     > impression this time: `fig-01` moved from rank #2 to rank #1, MRR 0.50 → 1.00. Full
+     > numbers in `scripts/eval_results.md` §11.
 3. `scripts/eval.py` — loads the pairs, runs the pipeline by importing `services/rag.py`
    directly (it is plain functions with no FastAPI in it, precisely so this is possible),
    across all three models from Day 7. Output: `eval_results.md`.

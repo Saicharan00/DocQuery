@@ -25,3 +25,12 @@ wheels/
 
 # Throwaway output from scripts/inspect_images.py.
 crops/
+
+# scripts/backfill_captions.py's working files: base64 copies of real
+# uploaded document images plus their captions, not metrics like eval_cache/.
+scripts/backfill_cache/
+
+# Output of scripts/smoke_test_caption.py and scripts/backfill_captions.py's
+# manual test runs.
+scripts/*_out*.txt
+scripts/*_check.txt

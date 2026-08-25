@@ -119,6 +119,19 @@ PREVIEW_CHARS = 300
 # a model that opens with "Sure, here you go" rather than room to write an essay.
 TITLE_TOKENS = 20
 
+# A caption is one or two sentences, never read by a person the way a title is
+# read in a sidebar — it only ever gets embedded, so extra length dilutes the
+# vector rather than helping retrieval. Measured 2026-08-24: 60 was too tight
+# and cut a real caption off mid-word once it started listing labeled parts
+# ("Masked Multi-Head Attention" with no closing quote) — a diagram with
+# several labels needs more than a plain two-sentence caption would.
+CAPTION_TOKENS = 100
+
+# Same reasoning as TITLE_MAX_CHARS: model output is untrusted input to the
+# database, and `chunks.content` (where a caption is stored) has no length
+# constraint of its own.
+CAPTION_MAX_CHARS = 600
+
 # How much of a conversation the model gets to see. Three exchanges is what
 # BUILD.md asks for; "turn" means one question *and* its answer, so this is six
 # database rows.
@@ -144,6 +157,16 @@ Rules:
 - Reply with the title and nothing else. No quotes, no preamble, no full stop.
 - Name the subject, not the act of asking: "Ionospheric delay correction", never
   "Question about the document".
+"""
+
+CAPTION_PROMPT = """Describe this figure from a document in one or two factual \
+sentences.
+
+Rules:
+- Say what kind of figure it is (diagram, chart, photo, table, etc.) and name \
+its key labeled parts.
+- Describe only what is visible. Do not guess at surrounding text you cannot see.
+- Reply with the description and nothing else. No preamble, no "This image shows".
 """
 
 REWRITE_PROMPT = """Rewrite the user's latest question so it can be understood on \
@@ -846,6 +869,66 @@ def generate_title(question: str) -> str:
     # what guarantees the string fits the same 200-character bound
     # `ConversationUpdate` enforces on a human rename — model output is untrusted
     # input to the database exactly like a request body is.
+
+
+@traceable(
+    run_type="llm",
+    # `jpeg` is raw bytes, not a data URI string, so `tracing.redact` (which
+    # only recognises `"data:..."` strings) would let it straight through to
+    # LangSmith. Swapped for a size label instead of being dropped entirely,
+    # so a trace still shows which figure a caption came from.
+    process_inputs=lambda inputs: {**inputs, "jpeg": f"<image: {len(inputs['jpeg']) // 1024} KB>"},
+)
+def caption_image(jpeg: bytes) -> str:
+    """Describe a figure in one or two sentences, for embedding instead of its pixels.
+
+    Ingestion-time counterpart to `ingestion.embed_images`: where that function
+    puts a picture straight into vector space, this puts words in front of the
+    picture first. A typed question is words too, so a caption's vector can
+    land near a question's vector in a way a raw pixel vector never could — see
+    the Day 12 note on the retrieval ceiling this closes.
+
+    Always `DEFAULT_MODEL`, same reasoning as `generate_title`: this result is
+    never shown to a person choosing a model, so there is no reason to bill
+    whichever model the chat call happens to be using.
+
+    Timeout is `ANSWER_TIMEOUT` (60s), not the shorter `HELPER_TIMEOUT` every
+    other helper here uses — `HELPER_TIMEOUT` was measured against text-only
+    calls (a title, a rewrite), and this is the first helper that also
+    uploads an image. Confirmed on 2026-08-24: a real call against
+    `HELPER_TIMEOUT` failed with `litellm.Timeout`, the same reason
+    `stream_answer` (which also carries images) already uses the longer one.
+    """
+    api_key = api_key_for(DEFAULT_MODEL)
+    data_uri = f"data:image/jpeg;base64,{base64.b64encode(jpeg).decode()}"
+
+    response = litellm.completion(
+        model=DEFAULT_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": CAPTION_PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                ],
+            }
+        ],
+        api_key=api_key,
+        max_tokens=CAPTION_TOKENS,
+        timeout=ANSWER_TIMEOUT,
+    )
+
+    caption = (response.choices[0].message.content or "").strip()
+
+    if not caption:
+        raise ValueError("The model returned an empty caption.")
+
+    return caption[:CAPTION_MAX_CHARS]
+
+    # In plain English: hand the picture to the same AI model the app already
+    # chats with, ask it to describe the picture in a sentence or two, and take
+    # that description back as plain text — the same shape as `generate_title`,
+    # just describing a picture instead of naming a question.
 
 
 # ---------------------------------------------------------------------------
