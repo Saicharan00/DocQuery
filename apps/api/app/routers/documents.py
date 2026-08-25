@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Annotated, Iterator
@@ -109,6 +110,19 @@ _in_flight_lock = threading.Lock()
 # ponytail: fixed guess, not measured against Railway's actual memory limit.
 # Raise it once that number is known.
 MAX_CONCURRENT_INGEST_STEPS = 7
+
+# How many `rag.caption_image` calls one image batch fires at once, instead of
+# one at a time. A caption call spends nearly all its time waiting on the
+# model's reply, not computing, so several waits can overlap for free — this
+# is what closed the "still open" item from Day 12's learning log, where a
+# 75-image document was slow because captioning was strictly sequential.
+#
+# Not set to IMAGE_EMBED_BATCH_SIZE (8): that number already ignores this
+# router's own MAX_CONCURRENT_INGEST_STEPS, which lets 7 documents ingest at
+# once. 8-wide bursts here would mean up to 56 simultaneous calls to the same
+# LLM key at peak load. 5 keeps most of the speedup while leaving headroom
+# under that stacked worst case.
+CAPTION_CONCURRENCY = 5
 
 
 def claim_ingest_step(_user_id: CurrentUser, document_id: UUID) -> Iterator[None]:
@@ -679,8 +693,25 @@ def ingest_step(
                     # words, and could barely match a pixel vector at all.
                     # `embed` (not `embed_images`) is what puts the caption in
                     # the same space every text chunk already uses.
-                    captions = [rag.caption_image(item.image) for item in batch]
+                    #
+                    # Run through a small thread pool rather than one call
+                    # after another: `pool.map` still hands back results in
+                    # submission order, so `captions[index]` pairs with
+                    # `batch[index]` exactly as it did sequentially — nothing
+                    # about *what* gets captioned changes, only how many
+                    # replies we wait on at once. See CAPTION_CONCURRENCY.
+                    with ThreadPoolExecutor(max_workers=CAPTION_CONCURRENCY) as pool:
+                        captions = list(
+                            pool.map(rag.caption_image, (item.image for item in batch))
+                        )
                     vectors = ingestion.embed(captions)
+
+                    # In plain English: instead of asking the model to
+                    # describe picture 1, waiting for the answer, then asking
+                    # about picture 2, we ask about up to 5 pictures at once
+                    # and wait for all 5 replies together. Same number of
+                    # questions get asked either way — we just stop standing
+                    # around one at a time between them.
                 else:
                     captions = None
                     vectors = ingestion.embed([item.content for item in batch])

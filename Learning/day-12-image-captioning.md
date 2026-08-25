@@ -166,11 +166,42 @@ Real money: the smoke test (one vision call, two embed calls), the backfill
 generation, plus judging) — all confirmed before spending, none of it
 needed separate approval beyond what was already flagged going in.
 
+## Day 12 addendum (2026-08-25) — concurrent captioning shipped
+
+Closed the "still open" item below the same day it was written, after a real
+upload felt slow enough to ask about it directly.
+
+The mental model that made the fix obvious: a caption call is almost
+entirely *waiting*, not *computing* — the server sends the image and then
+sits idle until the model replies. Waiting costs nothing, so several waits
+can happen at once for free; it's the same reason you can hold four ringing
+phones instead of calling four people one after another and getting through
+them four times faster. Firing captions through a small thread pool
+overlaps those waits instead of stacking them, with no change to *what* gets
+asked or *how many* times — same cost, same captions, just less standing
+around between them.
+
+The one real trade-off is rate limits, not money or quality: bursting more
+requests at once risks tripping the provider's per-second ceiling in a way
+sequential calls never do. `MAX_CONCURRENT_INGEST_STEPS` already allows 7
+documents to ingest at once, so a naive "caption all 8 images in a batch at
+once" would mean bursts of up to 56 simultaneous calls to the same LLM key
+under load — not 8. Capped concurrency at 5 (`CAPTION_CONCURRENCY` in
+`documents.py`) rather than matching it to the image batch size, to keep
+most of the speedup without stacking that worst case as high.
+
+Implementation is a stdlib `ThreadPoolExecutor(max_workers=5)` around the
+existing `rag.caption_image` calls — `pool.map` preserves submission order,
+so `captions[index]` still pairs with `batch[index]` exactly as it did
+sequentially. The existing rate-limit backoff (`TRANSIENT_ERRORS` in
+`documents.py`) needed no changes: a `litellm.RateLimitError` from inside
+the pool still propagates out of the `list(pool.map(...))` call the same way
+a sequential one would have.
+
 ## Still open
 
-- **Concurrent captioning during ingestion.** Sequential, one image at a
-  time, is what hit the rate-limit wall on a 75-image document. Not fixed,
-  just diagnosed and flagged.
+- ~~**Concurrent captioning during ingestion.**~~ Fixed same-day, see
+  addendum above.
 - **The abstain-gate saga's branch got its own PR (#52) merged mid-session,
   before this session even started** — worth remembering next time I'm
   reasoning about what's merged vs. pending from a stale memory snapshot
