@@ -453,7 +453,7 @@ export default function DashboardPage() {
           <UploadZone onUploaded={handleUploaded} />
 
           <p className="mt-3 text-xs text-muted-foreground">
-            Documents with charts or figures take a little longer — each image
+            Documents with charts or figures take a little longer. Each image
             gets described by a vision model before it&apos;s searchable.
             Thanks for your patience.
           </p>

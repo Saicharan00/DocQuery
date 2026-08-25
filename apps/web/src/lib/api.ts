@@ -298,10 +298,19 @@ export function useChatStream() {
       // to send the close notification, so `reader.read()` never settles — not
       // resolved, not rejected, just pending — and the page would sit on
       // "Thinking…" for as long as the OS takes to give up on the connection.
-      // Silence is the only symptom available, so silence is what we watch: a
-      // live stream is never quiet this long, because the server sends tokens
-      // continuously. Deliberately generous — a slow model must not trip it.
-      const IDLE_MS = 20_000;
+      // Silence is the only symptom available, so silence is what we watch.
+      //
+      // Set above `ANSWER_TIMEOUT` (60s, in `rag.py`) on purpose, not below it.
+      // This used to be 20s — "deliberately generous," the comment claimed, but
+      // it was actually *tighter* than the backend's own 60s ceiling on a single
+      // model call. A real Gemini call caught on 2026-08-25 (LangSmith trace)
+      // took 59-71s and then errored server-side, which should have reached the
+      // browser as `chat.py`'s specific "the model failed" message — instead
+      // this timer fired first, cancelled the connection, and the browser only
+      // ever saw its own generic "stalled" message. The backend's timeout must
+      // win that race for its error to ever be seen, so this has to be the
+      // looser of the two.
+      const IDLE_MS = 65_000;
 
       /** One read, but never an unbounded wait. */
       const readOrStall = async () => {
