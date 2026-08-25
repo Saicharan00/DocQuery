@@ -627,12 +627,12 @@ def cmd_resolve_hints() -> int:
 
         while True:
             if question["type"] == "figure-only":
-                # An image chunk's stored "content" is just a label
-                # ("[Image from page 3]"), so it always scores 0 against
-                # real question keywords and would never reach a plain
-                # top-5 — the one case this eval set has of the right
-                # answer being unrankable by text at all. Image chunks go
-                # first, ordered by page since that's how a human would
+                # Day 12: an image chunk's "content" is now a real caption,
+                # which *can* score against keywords — but this branch still
+                # lists every image chunk unconditionally rather than relying
+                # on that score, since a caption can miss the exact wording a
+                # question uses even when it's the right figure. Image chunks
+                # go first, ordered by page since that's how a human would
                 # scan the source PDF; a few top-scoring text chunks ride
                 # along in case the real target is a caption, not a figure.
                 images = sorted(

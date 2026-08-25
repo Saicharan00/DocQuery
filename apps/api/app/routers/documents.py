@@ -22,6 +22,7 @@ from typing import Annotated, Iterator
 from uuid import UUID, uuid4
 
 import httpx
+import litellm
 from cohere.errors import (
     GatewayTimeoutError,
     InternalServerError,
@@ -33,7 +34,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from app.config import get_settings
 from app.deps import CurrentUser, SupabaseClient, TokenExpiry
 from app.models.document import DocumentOut, IngestStepOut
-from app.services import ingestion
+from app.services import ingestion, rag
 
 logger = logging.getLogger(__name__)
 
@@ -427,8 +428,9 @@ def _items(data: bytes, mime_type: str | None) -> list[ingestion.Chunk]:
     return chunks + [
         ingestion.Chunk(
             index=len(chunks) + offset,
-            # A label, not the thing being embedded. `chunks.content` is
-            # `not null`, and Day 8 can show this next to a picture.
+            # A placeholder, not the thing that ends up stored: `chunks.content`
+            # is `not null`, so this fills the gap until `ingest_step` below
+            # replaces it with a real caption before the row is written.
             content=f"[Image from page {region.page_number}]",
             page_number=region.page_number,
             token_count=0,
@@ -483,6 +485,16 @@ TRANSIENT_ERRORS = (
     ServiceUnavailableError,
     GatewayTimeoutError,
     httpx.TransportError,
+    # Day 12: image batches now also call `rag.caption_image` (LiteLLM), not
+    # just Cohere, before they reach the same `except TRANSIENT_ERRORS` below.
+    # LiteLLM raises its own exception classes, never Cohere's, so the four
+    # genuinely temporary ones need naming here too — the same four
+    # `chat.py`'s `_STREAM_FAILURES` treats as "wait and try again" rather
+    # than "something is broken."
+    litellm.RateLimitError,
+    litellm.Timeout,
+    litellm.ServiceUnavailableError,
+    litellm.APIConnectionError,
 )
 
 # In plain English: a list of the ways a service we depend on can be
@@ -660,11 +672,18 @@ def ingest_step(
             is_image = batch[0].image is not None
 
             try:
-                vectors = (
-                    ingestion.embed_images([item.image for item in batch])
-                    if is_image
-                    else ingestion.embed([item.content for item in batch])
-                )
+                if is_image:
+                    # Day 12: caption each figure before embedding it, so the
+                    # vector carries real words ("a diagram showing...")
+                    # instead of raw pixels — a typed question can match
+                    # words, and could barely match a pixel vector at all.
+                    # `embed` (not `embed_images`) is what puts the caption in
+                    # the same space every text chunk already uses.
+                    captions = [rag.caption_image(item.image) for item in batch]
+                    vectors = ingestion.embed(captions)
+                else:
+                    captions = None
+                    vectors = ingestion.embed([item.content for item in batch])
             except TRANSIENT_ERRORS as exc:
                 # Not a failure — the embedding provider is saying "slower", or
                 # is briefly down. End the step with whatever is already written
@@ -687,7 +706,7 @@ def ingest_step(
             rows = []
 
             try:
-                for item, vector in zip(batch, vectors):
+                for index, (item, vector) in enumerate(zip(batch, vectors)):
                     image_path = None
 
                     if item.image:
@@ -717,7 +736,12 @@ def ingest_step(
                             # dangerous on any path RLS doesn't cover.
                             "user_id": user_id,
                             "document_id": str(document_id),
-                            "content": item.content,
+                            # A caption for an image row, the parsed text
+                            # otherwise. `captions` is only ever set when this
+                            # is an image batch, so this can't pick up a stale
+                            # value from the previous iteration of the outer
+                            # `for batch in _batches(...)` loop.
+                            "content": captions[index] if captions else item.content,
                             "embedding": vector,
                             "chunk_index": item.index,
                             "token_count": item.token_count,

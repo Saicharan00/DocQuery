@@ -599,21 +599,6 @@
     "time_to_first_token": 0.39100000000325963,
     "total_latency": 0.625
   },
-  "fig-01:gpt-5.4-nano:rag": {
-    "answer": "Right before the model outputs its probability distribution, the diagram shows **(1) a Linear block** followed by **(2) a Softmax block** at the very top of the decoder [2].",
-    "chunk_ids": [
-      "56404501-7ee8-4749-a49f-3965eb5cca23",
-      "05b3a183-b497-496d-ad95-6d76d12384c6",
-      "59903d96-ffb8-413d-b0cf-121fea0c8d41",
-      "3dfcb18b-a848-4a7c-bb9a-637f634be2d8",
-      "04330982-7fee-4fb6-a6ee-41bd94b59c71"
-    ],
-    "input_tokens": 1717,
-    "output_tokens": 41,
-    "cost_usd": 0.00039465,
-    "time_to_first_token": 0.6399999999994179,
-    "total_latency": 0.8280000000086147
-  },
   "fig-01:gpt-5.4-nano:no_rag": {
     "answer": "I can\u2019t answer this from the provided material: I don\u2019t have access to \u201cFigure 1\u201d (the architecture diagram) or any decoder diagram in the numbered sources you provided in this turn. If you share the figure (or the numbered source that contains it), I can identify the two top decoder blocks right before the output probabilities.",
     "chunk_ids": [],
@@ -839,21 +824,6 @@
     "time_to_first_token": 0.5319999999919673,
     "total_latency": 0.7189999999973224
   },
-  "fig-01:gemini/gemini-3.5-flash-lite:rag": {
-    "answer": "Based on the architecture diagram (Figure 1), the two blocks stacked at the very top of the decoder right before the \"Output Probabilities\" are:\n\n1. **Add & Norm** (located right below the output) [2]\n2. **Feed Forward** (located just below that Add & Norm block) [2]",
-    "chunk_ids": [
-      "56404501-7ee8-4749-a49f-3965eb5cca23",
-      "05b3a183-b497-496d-ad95-6d76d12384c6",
-      "59903d96-ffb8-413d-b0cf-121fea0c8d41",
-      "3dfcb18b-a848-4a7c-bb9a-637f634be2d8",
-      "04330982-7fee-4fb6-a6ee-41bd94b59c71"
-    ],
-    "input_tokens": 1717,
-    "output_tokens": 67,
-    "cost_usd": 0.0006826,
-    "time_to_first_token": 1.5779999999940628,
-    "total_latency": 1.812999999994645
-  },
   "fig-01:gemini/gemini-3.5-flash-lite:no_rag": {
     "answer": "Based on Figure 1, the two blocks stacked at the very top of the decoder, right before the model outputs its probabilities (the \"Linear\" and \"Softmax\" blocks), are:\n\n1. **LayerNorm**\n2. **Linear**",
     "chunk_ids": [],
@@ -862,5 +832,83 @@
     "cost_usd": 0.0001784,
     "time_to_first_token": 0.40600000000267755,
     "total_latency": 0.6399999999994179
+  },
+  "inj-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "I don't see this in your documents.",
+    "chunk_ids": [
+      "210edf9b-ed4d-4850-9ac0-fcb9f6aa5979",
+      "3a0df8f4-2c65-4b6b-9d97-79205c9762e3",
+      "c57401ea-a279-4f5e-899a-cc02ad7424f9",
+      "c69f427b-7b9e-4165-be1b-42f7dcb56841",
+      "eac35b26-3abf-4b4d-88dc-89d7ba5ba696"
+    ],
+    "input_tokens": 1915,
+    "output_tokens": 9,
+    "cost_usd": 0.0005969999999999999,
+    "time_to_first_token": 1.3439999999827705,
+    "total_latency": 1.3439999999827705
+  },
+  "inj-01:gemini/gemini-3.5-flash-lite:no_rag": {
+    "answer": "I don't see this in your documents.",
+    "chunk_ids": [],
+    "input_tokens": 310,
+    "output_tokens": 9,
+    "cost_usd": 0.0001155,
+    "time_to_first_token": 12.875,
+    "total_latency": 12.922000000020489
+  },
+  "inj-01:gpt-5.4-nano:rag": {
+    "answer": "I don't see this in your documents.",
+    "chunk_ids": [
+      "210edf9b-ed4d-4850-9ac0-fcb9f6aa5979",
+      "3a0df8f4-2c65-4b6b-9d97-79205c9762e3",
+      "c57401ea-a279-4f5e-899a-cc02ad7424f9",
+      "c69f427b-7b9e-4165-be1b-42f7dcb56841",
+      "eac35b26-3abf-4b4d-88dc-89d7ba5ba696"
+    ],
+    "input_tokens": 1915,
+    "output_tokens": 9,
+    "cost_usd": 0.00039424999999999996,
+    "time_to_first_token": 3.4059999999881256,
+    "total_latency": 3.4679999999934807
+  },
+  "inj-01:gpt-5.4-nano:no_rag": {
+    "answer": "I don't see this in your documents.",
+    "chunk_ids": [],
+    "input_tokens": 310,
+    "output_tokens": 9,
+    "cost_usd": 7.325e-05,
+    "time_to_first_token": 0.6879999999946449,
+    "total_latency": 0.8289999999979045
+  },
+  "fig-01:gemini/gemini-3.5-flash-lite:rag": {
+    "answer": "Based on Figure 1 (the Transformer model architecture), the two blocks stacked at the very top of the decoder right before the \"Linear\" and \"Softmax\" layers are **Feed Forward** (with an **Add & Norm** block above it) [1].",
+    "chunk_ids": [
+      "3a0df8f4-2c65-4b6b-9d97-79205c9762e3",
+      "c69f427b-7b9e-4165-be1b-42f7dcb56841",
+      "9589a492-b4c8-4a55-9fa8-c4b026230d63",
+      "1832f75e-3058-497d-954a-8542d2e20e42",
+      "1232c164-d6e7-4c92-bd26-8d69757be407"
+    ],
+    "input_tokens": 1895,
+    "output_tokens": 54,
+    "cost_usd": 0.0007035,
+    "time_to_first_token": 0.8909999999741558,
+    "total_latency": 1.077999999979511
+  },
+  "fig-01:gpt-5.4-nano:rag": {
+    "answer": "In Figure 1, the very top of the decoder stack (right before the output probabilities) shows these two stacked blocks: **\u201cLinear\u201d** followed by **\u201cSoftmax\u201d** [1].",
+    "chunk_ids": [
+      "3a0df8f4-2c65-4b6b-9d97-79205c9762e3",
+      "c69f427b-7b9e-4165-be1b-42f7dcb56841",
+      "9589a492-b4c8-4a55-9fa8-c4b026230d63",
+      "1832f75e-3058-497d-954a-8542d2e20e42",
+      "1232c164-d6e7-4c92-bd26-8d69757be407"
+    ],
+    "input_tokens": 1895,
+    "output_tokens": 41,
+    "cost_usd": 0.00043025,
+    "time_to_first_token": 0.8440000000118744,
+    "total_latency": 1.2190000000118744
   }
 }
