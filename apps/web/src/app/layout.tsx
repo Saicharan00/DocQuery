@@ -33,7 +33,15 @@ export default function RootLayout({
             `layout` (that's what the type actually exposes it under). We're
             still on dev/test Clerk keys underneath (relaxed security, no
             custom domain) — this only removes the visual reminder. */}
+        {/* Without these, Clerk doesn't know our app has its own sign-in/
+            sign-up pages — the "Don't have an account?" link inside each
+            widget falls back to Clerk's own hosted Account Portal page
+            instead of our styled route, which is why the two pages could
+            look consistent individually but navigating between them landed
+            somewhere undesigned. */}
         <ClerkProvider
+          signInUrl="/sign-in"
+          signUpUrl="/sign-up"
           appearance={{ options: { unsafe_disableDevelopmentModeWarnings: true } }}
         >
           {children}
