@@ -9,9 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Machine-local Claude Code state: per-machine settings and scratch worktrees.
-.claude/settings.local.json
-.claude/worktrees/
+# Claude Code local config/hooks/state — not part of the app, not for the public repo.
+.claude/
 
 # Real secrets — never commit. Keys live here at runtime.
 .env
