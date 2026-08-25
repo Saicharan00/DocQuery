@@ -9,8 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
-# Claude Code local config/hooks/state — not part of the app, not for the public repo.
+# Claude Code local config/hooks/state, plus internal working docs — not for the public repo.
 .claude/
+/CLAUDE.md
+/BUILD.md
 
 # Real secrets — never commit. Keys live here at runtime.
 .env
