@@ -206,7 +206,7 @@
     "ground_truth_answer": "A Linear layer followed by a Softmax layer, producing the 'Output Probabilities.'",
     "ground_truth_chunk_hint": "the Figure 1 architecture diagram image (near the start of the paper) \u2014 confirm the actual page/chunk against your app's retrieved sources, page numbering depends on your upload",
     "ground_truth_chunk_id": [
-      "05b3a183-b497-496d-ad95-6d76d12384c6"
+      "3a0df8f4-2c65-4b6b-9d97-79205c9762e3"
     ]
   }
 ]
